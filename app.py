@@ -4,29 +4,85 @@ import time
 from pytefas import Crawler
 from datetime import datetime, timedelta
 import pandas as pd
-import os
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# --- VERİTABANI (KAYIT) SİSTEMİ ---
-DOSYA_ADI = "portfoyum.csv"
-IZLEME_DOSYASI = "izleme_listesi.csv"
+# --- GOOGLE SHEETS BAĞLANTI AYARLARI ---
+def google_sheets_baglan():
+    try:
+        # Streamlit secrets (bulut güvenliği) veya yerel test için JSON tanımı
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        
+        # Eğer Streamlit Cloud üzerinde secrets tanımladıysanız oradan çeker, 
+        # yerelde çalışırken proje klasörüne koyacağınız 'credentials.json' dosyasını okur.
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        else:
+            creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+            
+        client = gspread.authorize(creds)
+        sheet = client.open("PortfoyVeritabani") # Google Drive'daki tablonuzun tam adı
+        return sheet
+    except Exception as e:
+        st.error(f"Google Sheets bağlantı hatası: {e}")
+        return None
 
-def verileri_yukle():
-    if os.path.exists(DOSYA_ADI):
-        return pd.read_csv(DOSYA_ADI).to_dict('records')
+def verileri_yukle_gsheets():
+    sh = google_sheets_baglan()
+    if sh:
+        try:
+            worksheet = sh.worksheet("Portfoy")
+            records = worksheet.get_all_records()
+            return records
+        except:
+            return []
     return []
 
-def verileri_kaydet(portfoy_listesi):
-    df = pd.DataFrame(portfoy_listesi)
-    df.to_csv(DOSYA_ADI, index=False)
+def verileri_kaydet_gsheets(portfoy_listesi):
+    sh = google_sheets_baglan()
+    if sh:
+        try:
+            worksheet = sh.worksheet("Portfoy")
+            worksheet.clear()
+            # Başlıkları ve verileri yeniden yaz
+            worksheet.append_row(["Tarih", "Tür", "Sembol", "Maliyet", "Adet"])
+            for item in portfoy_listesi:
+                worksheet.append_row([
+                    str(item.get("Tarih", "")),
+                    str(item.get("Tür", "")),
+                    str(item.get("Sembol", "")),
+                    float(item.get("Maliyet", 0.0)),
+                    float(item.get("Adet", 0.0))
+                ])
+        except Exception as e:
+            st.error(f"Kayıt hatası: {e}")
 
-def izleme_listesini_yukle():
-    if os.path.exists(IZLEME_DOSYASI):
-        return pd.read_csv(IZLEME_DOSYASI).to_dict('records')
+def izleme_listesini_yukle_gsheets():
+    sh = google_sheets_baglan()
+    if sh:
+        try:
+            worksheet = sh.worksheet("IzlemeListesi")
+            return worksheet.get_all_records()
+        except:
+            return []
     return []
 
-def izleme_listesini_kaydet(liste):
-    df = pd.DataFrame(liste)
-    df.to_csv(IZLEME_DOSYASI, index=False)
+def izleme_listesini_kaydet_gsheets(liste):
+    sh = google_sheets_baglan()
+    if sh:
+        try:
+            worksheet = sh.worksheet("IzlemeListesi")
+            worksheet.clear()
+            worksheet.append_row(["Liste Adi", "Sembol", "Tur"])
+            for item in liste:
+                worksheet.append_row([
+                    str(item.get("Liste Adi", "")),
+                    str(item.get("Sembol", "")),
+                    str(item.get("Tur", ""))
+                ])
+        except Exception as e:
+            st.error(f"İzleme listesi kayıt hatası: {e}")
 
 # --- VERİ ÇEKME MOTORLARI ---
 
@@ -34,16 +90,13 @@ def tefas_fon_fiyati_getir(fon_kodu):
     try:
         bugun = datetime.now()
         bes_gun_once = (bugun - timedelta(days=5)).strftime("%Y-%m-%d")
-        
         tefas = Crawler()
         df = tefas.fetch(start=bes_gun_once, kind="YAT", columns="info")
-        
         if df is not None and not df.empty:
             fon_verisi = df[df['fund_code'] == fon_kodu.upper()]
             if not fon_verisi.empty:
                 fon_verisi = fon_verisi.sort_values(by='date', ascending=False)
-                fiyat = float(fon_verisi.iloc[0]['price'])
-                return fiyat
+                return float(fon_verisi.iloc[0]['price'])
         return None
     except:
         return None
@@ -80,10 +133,10 @@ def degerli_maden_fiyati_getir(maden_turu, veriler):
         return veriler["gram_gumus"]
     return None
 
-# --- ARAYÜZ (FRONTEND) VE HAFIZA ---
+# --- ARAYÜZ ---
 
 st.set_page_config(page_title="Portföyüm", layout="wide")
-st.title("Gelişmiş Yatırım Portföyü 🚀")
+st.title("Gelişmiş Yatırım Portföyü 🚀 (Google Sheets Senkronize)")
 
 piyasa = piyasa_verilerini_getir()
 if piyasa:
@@ -92,7 +145,6 @@ else:
     if 'piyasa' not in st.session_state:
         st.session_state.piyasa = {"usd": 35.0, "ons_altin": 2700.0, "gram_altin": 3000.0, "yirmiiki_ayar": 2750.0, "ons_gumus": 30.0, "gram_gumus": 35.0}
 
-# --- SOL MENÜ ---
 with st.sidebar:
     st.header("📌 Menü")
     sayfa_secimi = st.radio(
@@ -101,10 +153,10 @@ with st.sidebar:
     )
 
 if 'portfoy' not in st.session_state:
-    st.session_state.portfoy = verileri_yukle()
+    st.session_state.portfoy = verileri_yukle_gsheets()
     
 if 'izleme_listesi' not in st.session_state:
-    st.session_state.izleme_listesi = izleme_listesini_yukle()
+    st.session_state.izleme_listesi = izleme_listesini_yukle_gsheets()
 
 if 'canli_fiyatlar' not in st.session_state:
     st.session_state.canli_fiyatlar = {}
@@ -113,8 +165,8 @@ if 'canli_fiyatlar' not in st.session_state:
 detayli_tablo = []
 if len(st.session_state.portfoy) > 0:
     for kalem in st.session_state.portfoy:
-        sembol = kalem["Sembol"]
-        tur = kalem["Tür"]
+        sembol = str(kalem["Sembol"])
+        tur = str(kalem["Tür"])
         
         if sembol not in st.session_state.canli_fiyatlar:
             fiyat = None
@@ -131,11 +183,15 @@ if len(st.session_state.portfoy) > 0:
             st.session_state.canli_fiyatlar[sembol] = fiyat
             
     for i, kalem in enumerate(st.session_state.portfoy):
-        tarih = kalem.get("Tarih", "-")
-        tur = kalem["Tür"]
-        sembol = kalem["Sembol"]
-        maliyet = kalem["Maliyet"]
-        adet = kalem["Adet"]
+        tarih = str(kalem.get("Tarih", "-"))
+        tur = str(kalem.get("Tür", ""))
+        sembol = str(kalem.get("Sembol", ""))
+        try:
+            maliyet = float(kalem.get("Maliyet", 0.0))
+            adet = float(kalem.get("Adet", 0.0))
+        except:
+            maliyet, adet = 0.0, 0.0
+            
         guncel_fiyat = st.session_state.canli_fiyatlar.get(sembol)
         
         if guncel_fiyat is not None:
@@ -165,7 +221,7 @@ if len(st.session_state.portfoy) > 0:
 df_detay = pd.DataFrame(detayli_tablo)
 
 # ==========================================
-# EKRAN 1: İŞLEM GEÇMİŞİ VE YÖNETİMİ
+# EKRAN 1: İŞLEM GEÇMİŞİ
 # ==========================================
 if sayfa_secimi == "📝 İşlem Geçmişi ve Yönetimi":
     st.header("📝 Tüm İşlem Geçmişi ve Yönetim Paneli")
@@ -179,13 +235,12 @@ if sayfa_secimi == "📝 İşlem Geçmişi ve Yönetimi":
             
     with col_sil:
         st.subheader("🗑️ Kayıt Sil")
-        st.caption("Tablodaki **İşlem No** numarasını girerek kaydı silebilirsiniz.")
         silinecek_id = st.number_input("İşlem No:", min_value=0, max_value=len(st.session_state.portfoy)-1 if len(st.session_state.portfoy)>0 else 0, step=1)
         if st.button("Seçili İşlemi Sil", type="primary"):
             if len(st.session_state.portfoy) > silinecek_id:
                 silinen = st.session_state.portfoy.pop(silinecek_id)
-                verileri_kaydet(st.session_state.portfoy)
-                st.success(f"{silinen['Sembol']} başarıyla silindi!")
+                verileri_kaydet_gsheets(st.session_state.portfoy)
+                st.success(f"{silinen['Sembol']} silindi!")
                 time.sleep(0.5)
                 st.rerun()
 
@@ -194,16 +249,15 @@ if sayfa_secimi == "📝 İşlem Geçmişi ve Yönetimi":
 # ==========================================
 elif sayfa_secimi == "⭐ İzleme Listesi":
     st.header("⭐ Hisse ve Varlık İzleme Listeleri")
-    st.markdown("Fiyatlarını takip etmek istediğiniz varlıkları özel gruplar altında toplayabilirsiniz.")
     
     with st.form("izleme_formu"):
         col_l1, col_l2, col_l3 = st.columns(3)
         with col_l1:
-            liste_adi = st.text_input("İzleme Listesi Adı (Örn: Yapay Zeka, Temettü)").strip().title()
+            liste_adi = st.text_input("İzleme Listesi Adı").strip().title()
         with col_l2:
-            takip_sembol = st.text_input("Sembol / Kod (Örn: NVDA, AKBNK.IS, AFT)").strip().upper()
+            takip_sembol = st.text_input("Sembol / Kod (Örn: NVDA)").strip().upper()
         with col_l3:
-            takip_turu = st.selectbox("Piyasa / Tür", ("ABD Hisse / ETF", "BİST Hisse", "TEFAS Fonu"))
+            takip_turu = st.selectbox("Tür", ("ABD Hisse / ETF", "BİST Hisse", "TEFAS Fonu"))
             
         ekle_btn = st.form_submit_button("Listeye Ekle", type="primary")
         if ekle_btn and liste_adi and takip_sembol:
@@ -212,227 +266,124 @@ elif sayfa_secimi == "⭐ İzleme Listesi":
                 "Sembol": takip_sembol,
                 "Tur": takip_turu
             })
-            izleme_listesini_kaydet(st.session_state.izleme_listesi)
-            st.success(f"{takip_sembol}, '{liste_adi}' listesine eklendi!")
+            izleme_listesini_kaydet_gsheets(st.session_state.izleme_listesi)
+            st.success("Eklendi!")
             st.rerun()
 
     st.divider()
-
     if len(st.session_state.izleme_listesi) > 0:
         df_izleme = pd.DataFrame(st.session_state.izleme_listesi)
-        benzersiz_listeler = df_izleme['Liste Adi'].unique()
-        
-        for l_adi in benzersiz_listeler:
+        for l_adi in df_izleme['Liste Adi'].unique():
             st.subheader(f"📂 {l_adi} Listesi")
-            grup_veriler = df_izleme[df_izleme['Liste Adi'] == l_adi]
-            
-            tablo_verisi = []
-            for idx, row in grup_veriler.iterrows():
-                s = row['Sembol']
-                t = row['Tur']
-                guncel_fiyat = None
-                gunluk_degisim = 0.0
-                
+            grup = df_izleme[df_izleme['Liste Adi'] == l_adi]
+            tablo_v = []
+            for idx, row in grup.iterrows():
+                s, t = row['Sembol'], row['Tur']
+                fiyat = None
                 try:
                     if t in ["ABD Hisse / ETF", "BİST Hisse"]:
-                        ticker = yf.Ticker(s)
-                        hist = ticker.history(period="2d")
-                        if not hist.empty:
-                            guncel_fiyat = float(hist['Close'].iloc[-1])
-                            if len(hist) >= 2:
-                                onceki = float(hist['Close'].iloc[-2])
-                                gunluk_degisim = ((guncel_fiyat - onceki) / onceki) * 100
+                        fiyat = float(yf.Ticker(s).history(period="1d")['Close'].iloc[-1])
                     elif t == "TEFAS Fonu":
-                        guncel_fiyat = tefas_fon_fiyati_getir(s)
+                        fiyat = tefas_fon_fiyati_getir(s)
                 except:
                     pass
-                
-                if guncel_fiyat is not None:
-                    if t == "ABD Hisse / ETF":
-                        fiyat_tl = guncel_fiyat * st.session_state.piyasa['usd']
-                        tablo_verisi.append({
-                            "Kayıt ID": idx, "Sembol": s, "Tür": t,
-                            "Fiyat (USD)": round(guncel_fiyat, 2),
-                            "Fiyat (TL)": round(fiyat_tl, 2),
-                            "Günlük Değişim (%)": f"%{gunluk_degisim:.2f}"
-                        })
-                    else:
-                        tablo_verisi.append({
-                            "Kayıt ID": idx, "Sembol": s, "Tür": t,
-                            "Fiyat (USD)": "-",
-                            "Fiyat (TL)": round(guncel_fiyat, 4),
-                            "Günlük Değişim (%)": f"%{gunluk_degisim:.2f}"
-                        })
-                else:
-                    tablo_verisi.append({
-                        "Kayıt ID": idx, "Sembol": s, "Tür": t,
-                        "Fiyat (USD)": "Veri Alınamadı", "Fiyat (TL)": "Veri Alınamadı", "Günlük Değişim (%)": "-"
-                    })
-                    
-            st.dataframe(tablo_verisi, use_container_width=True)
-            
-            col_sil1, col_sil2 = st.columns([3, 1])
-            with col_sil2:
-                silinecek_index = st.number_input(f"Silinecek Kayıt ID ({l_adi}):", min_value=0, max_value=max(grup_veriler.index) if not grup_veriler.empty else 0, step=1, key=f"del_{l_adi}")
-                if st.button(f"Hisseyi Sil ({l_adi})", key=f"btn_del_{l_adi}"):
-                    if any(grup_veriler.index == silinecek_index):
-                        st.session_state.izleme_listesi = [item for i, item in enumerate(st.session_state.izleme_listesi) if i != silinecek_index]
-                        izleme_listesini_kaydet(st.session_state.izleme_listesi)
-                        st.success("Sembol listeden kaldırıldı.")
-                        time.sleep(0.5)
-                        st.rerun()
+                tablo_v.append({"ID": idx, "Sembol": s, "Fiyat": fiyat})
+            st.dataframe(tablo_v)
             st.divider()
-    else:
-        st.info("Henüz oluşturulmuş bir izleme listeniz yok.")
 
 # ==========================================
-# EKRAN 3: KONSOLİDE PORTFÖY ÖZETİ (ANA EKRAN)
+# EKRAN 3: PORTFÖY ÖZETİ
 # ==========================================
 elif sayfa_secimi == "📈 Portföy Özeti":
-    # Canlı kurlar ve maden fiyatları paneli SADECE bu sekmede gözükür
     p = st.session_state.piyasa
-    st.markdown(f"""
-    > 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | ✨ **22 Ayar:** {p['yirmiiki_ayar']:.2f} ₺ | 🥈 **Gümüş Ons:** ${p['ons_gumus']:.2f} | ⚪ **Gümüş (TL):** {p['gram_gumus']:.2f} ₺
-    """)
+    st.markdown(f"> 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | 🥈 **Gümüş (TL):** {p['gram_gumus']:.2f} ₺")
 
-    # Yeni varlık ekleme formu SADECE bu sekmede gözükür
     with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
-        ana_kategori = st.radio(
-            "Ne eklemek istiyorsunuz?", 
-            ("Hisse / ETF / Fon", "Değerli Madenler"),
-            horizontal=True
-        )
-
+        ana_kategori = st.radio("Kategori", ("Hisse / ETF / Fon", "Değerli Madenler"), horizontal=True)
         if ana_kategori == "Hisse / ETF / Fon":
-            varlik_turu = st.selectbox(
-                "Tür Seçin:",
-                ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu")
-            )
+            varlik_turu = st.selectbox("Tür", ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu"))
         else:
-            varlik_turu = st.selectbox(
-                "Değerli Maden Seçin:",
-                ("Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)")
-            )
+            varlik_turu = st.selectbox("Maden", ("Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)"))
 
-        kolon1, kolon2, kolon3, kolon4 = st.columns(4)
-
-        with kolon1:
-            if varlik_turu == "BİST Hisse Senedi":
-                sembol_giris = st.text_input("Sembol", "THYAO.IS").upper()
-            elif varlik_turu == "ABD Hisse Senedi":
-                 sembol_giris = st.text_input("Sembol", "AAPL").upper()
-                 st.caption("Alış Fiyatı: USD")
-            elif varlik_turu == "Yabancı Borsa Fonu (ETF)":
-                 sembol_giris = st.text_input("Sembol", "FDVV").upper()
-                 st.caption("Alış Fiyatı: USD")
-            elif varlik_turu == "TEFAS Fonu":
-                sembol_giris = st.text_input("Fon Kodu", "AFT").upper()
-            else:
-                sembol_giris = varlik_turu
-                st.write(f"Seçilen: {varlik_turu}")
-
-        with kolon2:
-            maliyet_giris = st.number_input("Alış Fiyatınız", min_value=0.0, format="%.4f")
-        with kolon3:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            sembol_giris = st.text_input("Sembol", "AAPL" if "ABD" in varlik_turu else "THYAO.IS").upper()
+        with c2:
+            maliyet_giris = st.number_input("Alış Fiyatı", min_value=0.0, format="%.4f")
+        with c3:
             adet_giris = st.number_input("Adet / Gram", min_value=0.0, format="%.2f")
-        with kolon4:
-            tarih_giris = st.date_input("Alım Tarihi", datetime.now())
+        with c4:
+            tarih_giris = st.date_input("Tarih", datetime.now())
 
         if st.button("Portföye Kaydet", type="primary"):
-            yeni_islem = {
+            st.session_state.portfoy.append({
                 "Tarih": tarih_giris.strftime("%Y-%m-%d"),
                 "Tür": varlik_turu,
                 "Sembol": sembol_giris,
                 "Maliyet": maliyet_giris,
                 "Adet": adet_giris
-            }
-            st.session_state.portfoy.append(yeni_islem)
-            verileri_kaydet(st.session_state.portfoy)
-            st.success(f"{sembol_giris} portföye kalıcı olarak eklendi!")
-            time.sleep(0.5) 
-            st.rerun() 
+            })
+            verileri_kaydet_gsheets(st.session_state.portfoy)
+            st.success("Google E-Tabloya kaydedildi!")
+            time.sleep(0.5)
+            st.rerun()
 
     st.divider()
-
+    st.header("📊 Konsolide Portföy Özeti")
+    
     genel_toplam_yatirilan_tl = 0.0
     genel_guncel_tutar_tl = 0.0
     
-    st.header("📊 Konsolide Portföy Özeti")
-    
     if not df_detay.empty:
-        varlik_turleri = df_detay['Tür'].unique()
-        
-        for tur in varlik_turleri:
+        for tur in df_detay['Tür'].unique():
             st.subheader(f"🔹 {tur}")
             grup = df_detay[df_detay['Tür'] == tur]
-            varliklar = grup['Varlık'].unique()
-            ozet_tablo = []
-            
-            for v in varliklar:
-                alt_grup = grup[grup['Varlık'] == v]
-                toplam_adet = alt_grup['Adet'].sum()
-                
-                if toplam_adet > 0:
+            ozet = []
+            for v in grup['Varlık'].unique():
+                alt = grup[grup['Varlık'] == v]
+                top_adet = alt['Adet'].sum()
+                if top_adet > 0:
                     if tur in ["ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)"]:
-                        toplam_yatirilan_usd = (alt_grup['Alış (USD)'] * alt_grup['Adet']).sum()
-                        ort_maliyet_usd = toplam_yatirilan_usd / toplam_adet
-                        ort_maliyet_tl = ort_maliyet_usd * st.session_state.piyasa['usd']
-                        guncel_fiyat_usd = alt_grup['Güncel (USD)'].iloc[0]
-                        guncel_fiyat_tl = alt_grup['Güncel (TL)'].iloc[0]
-                        total_kz_usd = alt_grup['K/Z (USD)'].sum()
-                        total_kz_tl = alt_grup['K/Z (TL)'].sum()
+                        top_yat_usd = (alt['Alış (USD)'] * alt['Adet']).sum()
+                        ort_usd = top_yat_usd / top_adet
+                        ort_tl = ort_usd * st.session_state.piyasa['usd']
+                        guncel_usd = alt['Güncel (USD)'].iloc[0]
+                        guncel_tl = alt['Güncel (TL)'].iloc[0]
+                        top_yat_tl = (alt['Alış (TL)'] * alt['Adet']).sum()
+                        guncel_tut_tl = guncel_tl * top_adet
+                        genel_toplam_yatirilan_tl += top_yat_tl
+                        genel_guncel_tutar_tl += guncel_tut_tl
+                        kz_yuzde = ((guncel_tut_tl - top_yat_tl) / top_yat_tl * 100) if top_yat_tl > 0 else 0
                         
-                        toplam_yatirilan_tl_varlik = (alt_grup['Alış (TL)'] * alt_grup['Adet']).sum()
-                        guncel_tutar_tl_varlik = guncel_fiyat_tl * toplam_adet
-                        
-                        genel_toplam_yatirilan_tl += toplam_yatirilan_tl_varlik
-                        genel_guncel_tutar_tl += guncel_tutar_tl_varlik
-                        
-                        toplam_maliyet_tl = ort_maliyet_tl * toplam_adet
-                        kz_yuzde = ((guncel_tutar_tl_varlik - toplam_maliyet_tl) / toplam_maliyet_tl * 100) if toplam_maliyet_tl > 0 else 0
-                        
-                        ozet_tablo.append({
-                            "Varlık": v, "Toplam Adet": toplam_adet,
-                            "Ort. Maliyet (USD)": round(ort_maliyet_usd, 2), "Güncel (USD)": round(guncel_fiyat_usd, 2),
-                            "Toplam Maliyet (USD)": round(toplam_yatirilan_usd, 2), "Toplam Tutar (USD)": round(guncel_fiyat_usd * toplam_adet, 2),
-                            "Ort. Maliyet (TL)": round(ort_maliyet_tl, 2), "Güncel (TL)": round(guncel_fiyat_tl, 2),
-                            "Toplam Maliyet (TL)": round(toplam_maliyet_tl, 2), "Toplam Tutar (TL)": round(guncel_tutar_tl_varlik, 2),
-                            "Total K/Z (USD)": round(total_kz_usd, 2), "Total K/Z (TL)": round(total_kz_tl, 2), "K/Z (%)": f"%{kz_yuzde:.2f}"
+                        ozet.append({
+                            "Varlık": v, "Toplam Adet": top_adet,
+                            "Ort. Maliyet (USD)": round(ort_usd, 2), "Güncel (USD)": round(guncel_usd, 2),
+                            "Toplam Maliyet (TL)": round(top_yat_tl, 2), "Toplam Tutar (TL)": round(guncel_tut_tl, 2),
+                            "K/Z (%)": f"%{kz_yuzde:.2f}"
                         })
                     else:
-                        toplam_yatirilan_tl_varlik = (alt_grup['Alış (TL)'] * alt_grup['Adet']).sum()
-                        ort_maliyet_tl = toplam_yatirilan_tl_varlik / toplam_adet
-                        guncel_fiyat_tl = alt_grup['Güncel (TL)'].iloc[0]
-                        total_kz_tl = alt_grup['K/Z (TL)'].sum()
+                        top_yat_tl = (alt['Alış (TL)'] * alt['Adet']).sum()
+                        ort_tl = top_yat_tl / top_adet
+                        guncel_tl = alt['Güncel (TL)'].iloc[0]
+                        guncel_tut_tl = guncel_tl * top_adet
+                        genel_toplam_yatirilan_tl += top_yat_tl
+                        genel_guncel_tutar_tl += guncel_tut_tl
+                        kz_yuzde = ((guncel_tut_tl - top_yat_tl) / top_yat_tl * 100) if top_yat_tl > 0 else 0
                         
-                        guncel_tutar_tl_varlik = guncel_fiyat_tl * toplam_adet
-                        
-                        genel_toplam_yatirilan_tl += toplam_yatirilan_tl_varlik
-                        genel_guncel_tutar_tl += guncel_tutar_tl_varlik
-                        
-                        toplam_maliyet_tl = toplam_yatirilan_tl_varlik
-                        kz_yuzde = ((guncel_tutar_tl_varlik - toplam_maliyet_tl) / toplam_maliyet_tl * 100) if toplam_maliyet_tl > 0 else 0
-                        
-                        ozet_tablo.append({
-                            "Varlık": v, "Toplam Adet": toplam_adet,
-                            "Ort. Maliyet (TL)": round(ort_maliyet_tl, 4), "Güncel (TL)": round(guncel_fiyat_tl, 4),
-                            "Toplam Maliyet (TL)": round(toplam_maliyet_tl, 2), "Toplam Tutar (TL)": round(guncel_tutar_tl_varlik, 2),
-                            "Total K/Z (TL)": round(total_kz_tl, 2), "K/Z (%)": f"%{kz_yuzde:.2f}"
+                        ozet.append({
+                            "Varlık": v, "Toplam Adet": top_adet,
+                            "Ort. Maliyet (TL)": round(ort_tl, 4), "Güncel (TL)": round(guncel_tl, 4),
+                            "Toplam Maliyet (TL)": round(top_yat_tl, 2), "Toplam Tutar (TL)": round(guncel_tut_tl, 2),
+                            "K/Z (%)": f"%{kz_yuzde:.2f}"
                         })
-            
-            st.dataframe(ozet_tablo, use_container_width=True)
+            st.dataframe(ozet, use_container_width=True)
 
-        # --- GENEL TOPLAM GÖSTERGESİ ---
         st.divider()
-        genel_kz_tl = genel_guncel_tutar_tl - genel_toplam_yatirilan_tl
-        kz_yuzde = (genel_kz_tl / genel_toplam_yatirilan_tl * 100) if genel_toplam_yatirilan_tl > 0 else 0
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("💰 Toplam Yatırılan Tutar", f"{genel_toplam_yatirilan_tl:,.2f} ₺")
-        with col2:
-            st.metric("📈 Şu Anki Toplam Tutar", f"{genel_guncel_tutar_tl:,.2f} ₺")
-        with col3:
-            st.metric("🎯 Toplam Kâr / Zarar", f"{genel_kz_tl:,.2f} ₺", f"{kz_yuzde:,.2f}%")
+        genel_kz = genel_guncel_tutar_tl - genel_toplam_yatirilan_tl
+        genel_yuzde = (genel_kz / genel_toplam_yatirilan_tl * 100) if genel_toplam_yatirilan_tl > 0 else 0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("💰 Yatırılan", f"{genel_toplam_yatirilan_tl:,.2f} ₺")
+        c2.metric("📈 Güncel", f"{genel_guncel_tutar_tl:,.2f} ₺")
+        c3.metric("🎯 Kâr / Zarar", f"{genel_kz:,.2f} ₺", f"{genel_yuzde:,.2f}%")
     else:
-        st.info("Portföyünüz şu an boş. Üstteki 'Yeni Varlık Ekle' alanından ekleme yapabilirsiniz.")
+        st.info("Portföyünüz boş.")
