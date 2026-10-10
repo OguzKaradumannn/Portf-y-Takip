@@ -4,88 +4,44 @@ import time
 from pytefas import Crawler
 from datetime import datetime, timedelta
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from streamlit_gsheets import GSheetsConnection
 
-# --- GOOGLE SHEETS BAĞLANTI AYARLARI ---
-def google_sheets_baglan():
-    try:
-        # Streamlit secrets (bulut güvenliği) veya yerel test için JSON tanımı
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        
-        # Eğer Streamlit Cloud üzerinde secrets tanımladıysanız oradan çeker, 
-        # yerelde çalışırken proje klasörüne koyacağınız 'credentials.json' dosyasını okur.
-        if "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        else:
-            creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-            
-        client = gspread.authorize(creds)
-        sheet = client.open("PortfoyVeritabani") # Google Drive'daki tablonuzun tam adı
-        return sheet
-    except Exception as e:
-        st.error(f"Google Sheets bağlantı hatası: {e}")
-        return None
-
+# --- GOOGLE SHEETS BAĞLANTI MOTORU ---
 def verileri_yukle_gsheets():
-    sh = google_sheets_baglan()
-    if sh:
-        try:
-            worksheet = sh.worksheet("Portfoy")
-            records = worksheet.get_all_records()
-            return records
-        except:
-            return []
-    return []
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        df = conn.read(worksheet="Portfoy", usecols=[0, 1, 2, 3, 4], ttl=0)
+        df = df.dropna(how="all")
+        return df.to_dict('records')
+    except:
+        return []
 
 def verileri_kaydet_gsheets(portfoy_listesi):
-    sh = google_sheets_baglan()
-    if sh:
-        try:
-            worksheet = sh.worksheet("Portfoy")
-            worksheet.clear()
-            # Başlıkları ve verileri yeniden yaz
-            worksheet.append_row(["Tarih", "Tür", "Sembol", "Maliyet", "Adet"])
-            for item in portfoy_listesi:
-                worksheet.append_row([
-                    str(item.get("Tarih", "")),
-                    str(item.get("Tür", "")),
-                    str(item.get("Sembol", "")),
-                    float(item.get("Maliyet", 0.0)),
-                    float(item.get("Adet", 0.0))
-                ])
-        except Exception as e:
-            st.error(f"Kayıt hatası: {e}")
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        df = pd.DataFrame(portfoy_listesi)
+        conn.update(worksheet="Portfoy", data=df)
+    except Exception as e:
+        st.error(f"Kayıt hatası: {e}")
 
 def izleme_listesini_yukle_gsheets():
-    sh = google_sheets_baglan()
-    if sh:
-        try:
-            worksheet = sh.worksheet("IzlemeListesi")
-            return worksheet.get_all_records()
-        except:
-            return []
-    return []
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        df = conn.read(worksheet="IzlemeListesi", usecols=[0, 1, 2], ttl=0)
+        df = df.dropna(how="all")
+        return df.to_dict('records')
+    except:
+        return []
 
 def izleme_listesini_kaydet_gsheets(liste):
-    sh = google_sheets_baglan()
-    if sh:
-        try:
-            worksheet = sh.worksheet("IzlemeListesi")
-            worksheet.clear()
-            worksheet.append_row(["Liste Adi", "Sembol", "Tur"])
-            for item in liste:
-                worksheet.append_row([
-                    str(item.get("Liste Adi", "")),
-                    str(item.get("Sembol", "")),
-                    str(item.get("Tur", ""))
-                ])
-        except Exception as e:
-            st.error(f"İzleme listesi kayıt hatası: {e}")
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        df = pd.DataFrame(liste)
+        conn.update(worksheet="IzlemeListesi", data=df)
+    except Exception as e:
+        st.error(f"İzleme listesi kayıt hatası: {e}")
 
 # --- VERİ ÇEKME MOTORLARI ---
-
 def tefas_fon_fiyati_getir(fon_kodu):
     try:
         bugun = datetime.now()
@@ -134,7 +90,6 @@ def degerli_maden_fiyati_getir(maden_turu, veriler):
     return None
 
 # --- ARAYÜZ ---
-
 st.set_page_config(page_title="Portföyüm", layout="wide")
 st.title("Gelişmiş Yatırım Portföyü 🚀 (Google Sheets Senkronize)")
 
@@ -165,10 +120,10 @@ if 'canli_fiyatlar' not in st.session_state:
 detayli_tablo = []
 if len(st.session_state.portfoy) > 0:
     for kalem in st.session_state.portfoy:
-        sembol = str(kalem["Sembol"])
-        tur = str(kalem["Tür"])
+        sembol = str(kalem.get("Sembol", ""))
+        tur = str(kalem.get("Tür", ""))
         
-        if sembol not in st.session_state.canli_fiyatlar:
+        if sembol and sembol not in st.session_state.canli_fiyatlar:
             fiyat = None
             if tur in ["BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)"]:
                 try:
@@ -186,6 +141,8 @@ if len(st.session_state.portfoy) > 0:
         tarih = str(kalem.get("Tarih", "-"))
         tur = str(kalem.get("Tür", ""))
         sembol = str(kalem.get("Sembol", ""))
+        if not sembol:
+            continue
         try:
             maliyet = float(kalem.get("Maliyet", 0.0))
             adet = float(kalem.get("Adet", 0.0))
@@ -240,7 +197,7 @@ if sayfa_secimi == "📝 İşlem Geçmişi ve Yönetimi":
             if len(st.session_state.portfoy) > silinecek_id:
                 silinen = st.session_state.portfoy.pop(silinecek_id)
                 verileri_kaydet_gsheets(st.session_state.portfoy)
-                st.success(f"{silinen['Sembol']} silindi!")
+                st.success(f"{silinen.get('Sembol')} silindi!")
                 time.sleep(0.5)
                 st.rerun()
 
