@@ -78,7 +78,8 @@ st.subheader("Yeni Varlık Ekle")
 
 varlik_turu = st.radio(
     "Ne eklemek istiyorsunuz?", 
-    ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu", "Gram Altın")
+    ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu", "Gram Altın"),
+    horizontal=True
 )
 
 kolon1, kolon2, kolon3, kolon4 = st.columns(4)
@@ -114,10 +115,7 @@ if st.button("Portföye Ekle"):
         "Adet": adet_giris
     }
     st.session_state.portfoy.append(yeni_islem)
-    
-    # Her eklemede veritabanını (CSV) güncelle
     verileri_kaydet(st.session_state.portfoy)
-    
     st.success(f"{sembol_giris} portföye kalıcı olarak eklendi!")
     time.sleep(0.5) 
     st.rerun() 
@@ -125,11 +123,6 @@ if st.button("Portföye Ekle"):
 st.divider()
 
 # --- PORTFÖY HESAPLAMA MOTORU ---
-
-st.subheader("Güncel Durum")
-
-# Silme özelliği için iki kolon oluştur
-tablo_kolonu, silme_kolonu = st.columns([4, 1])
 
 if len(st.session_state.portfoy) > 0:
     detayli_tablo = []
@@ -182,67 +175,99 @@ if len(st.session_state.portfoy) > 0:
                     "Adet": adet, "K/Z (USD)": None, "K/Z (TL)": round(kar_zarar_tl, 2)
                 })
 
-    with tablo_kolonu:
-        st.markdown("#### 📊 Konsolide Portföy Özeti")
-        df_detay = pd.DataFrame(detayli_tablo)
-        
+    df_detay = pd.DataFrame(detayli_tablo)
+    
+    # --- YAN MENÜ (SIDEBAR): İŞLEM GEÇMİŞİ VE SİLME ---
+    with st.sidebar:
+        st.header("📝 İşlem Geçmişi")
+        st.caption("Aşağıdaki tablo tüm geçmiş alımlarınızı gösterir.")
         if not df_detay.empty:
+            st.dataframe(df_detay)
+            
+            st.divider()
+            st.subheader("🗑️ Kayıt Sil")
+            silinecek_id = st.number_input("Silmek istediğiniz İşlem No'yu girin:", min_value=0, max_value=len(st.session_state.portfoy)-1, step=1)
+            if st.button("İşlemi Sil", type="primary"):
+                if len(st.session_state.portfoy) > silinecek_id:
+                    st.session_state.portfoy.pop(silinecek_id)
+                    verileri_kaydet(st.session_state.portfoy)
+                    st.rerun()
+
+    # --- ANA SAYFA: KATEGORİLERE GÖRE GRUPLANMIŞ PORTFÖY ÖZETİ ---
+    genel_toplam_yatirilan_tl = 0.0
+    genel_guncel_tutar_tl = 0.0
+    
+    st.header("📊 Konsolide Portföy Özeti")
+    
+    if not df_detay.empty:
+        varlik_turleri = df_detay['Tür'].unique()
+        
+        for tur in varlik_turleri:
+            st.subheader(f"🔹 {tur}")
+            grup = df_detay[df_detay['Tür'] == tur]
+            varliklar = grup['Varlık'].unique()
             ozet_tablo = []
-            varliklar = df_detay['Varlık'].unique()
             
             for v in varliklar:
-                grup = df_detay[df_detay['Varlık'] == v]
-                tur = grup['Tür'].iloc[0]
-                toplam_adet = grup['Adet'].sum()
+                alt_grup = grup[grup['Varlık'] == v]
+                toplam_adet = alt_grup['Adet'].sum()
                 
                 if toplam_adet > 0:
                     if tur in ["ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)"]:
-                        toplam_yatirilan_usd = (grup['Alış (USD)'] * grup['Adet']).sum()
+                        toplam_yatirilan_usd = (alt_grup['Alış (USD)'] * alt_grup['Adet']).sum()
                         ort_maliyet_usd = toplam_yatirilan_usd / toplam_adet
                         ort_maliyet_tl = ort_maliyet_usd * st.session_state.guncel_usd_kuru
-                        guncel_fiyat_usd = grup['Güncel (USD)'].iloc[0]
-                        guncel_fiyat_tl = grup['Güncel (TL)'].iloc[0]
-                        total_kz_usd = grup['K/Z (USD)'].sum()
-                        total_kz_tl = grup['K/Z (TL)'].sum()
+                        guncel_fiyat_usd = alt_grup['Güncel (USD)'].iloc[0]
+                        guncel_fiyat_tl = alt_grup['Güncel (TL)'].iloc[0]
+                        total_kz_usd = alt_grup['K/Z (USD)'].sum()
+                        total_kz_tl = alt_grup['K/Z (TL)'].sum()
+                        
+                        toplam_yatirilan_tl_varlik = (alt_grup['Alış (TL)'] * alt_grup['Adet']).sum()
+                        guncel_tutar_tl_varlik = guncel_fiyat_tl * toplam_adet
+                        
+                        genel_toplam_yatirilan_tl += toplam_yatirilan_tl_varlik
+                        genel_guncel_tutar_tl += guncel_tutar_tl_varlik
                         
                         ozet_tablo.append({
-                            "Varlık": v, "Tür": tur, "Toplam Adet": toplam_adet,
+                            "Varlık": v, "Toplam Adet": toplam_adet,
                             "Ort. Maliyet (USD)": round(ort_maliyet_usd, 2), "Güncel (USD)": round(guncel_fiyat_usd, 2),
                             "Ort. Maliyet (TL)": round(ort_maliyet_tl, 2), "Güncel (TL)": round(guncel_fiyat_tl, 2),
                             "Total K/Z (USD)": round(total_kz_usd, 2), "Total K/Z (TL)": round(total_kz_tl, 2)
                         })
                     else:
-                        toplam_yatirilan_tl = (grup['Alış (TL)'] * grup['Adet']).sum()
-                        ort_maliyet_tl = toplam_yatirilan_tl / toplam_adet
-                        guncel_fiyat_tl = grup['Güncel (TL)'].iloc[0]
-                        total_kz_tl = grup['K/Z (TL)'].sum()
+                        toplam_yatirilan_tl_varlik = (alt_grup['Alış (TL)'] * alt_grup['Adet']).sum()
+                        ort_maliyet_tl = toplam_yatirilan_tl_varlik / toplam_adet
+                        guncel_fiyat_tl = alt_grup['Güncel (TL)'].iloc[0]
+                        total_kz_tl = alt_grup['K/Z (TL)'].sum()
+                        
+                        guncel_tutar_tl_varlik = guncel_fiyat_tl * toplam_adet
+                        
+                        genel_toplam_yatirilan_tl += toplam_yatirilan_tl_varlik
+                        genel_guncel_tutar_tl += guncel_tutar_tl_varlik
                         
                         ozet_tablo.append({
-                            "Varlık": v, "Tür": tur, "Toplam Adet": toplam_adet,
-                            "Ort. Maliyet (USD)": "-", "Güncel (USD)": "-",
+                            "Varlık": v, "Toplam Adet": toplam_adet,
                             "Ort. Maliyet (TL)": round(ort_maliyet_tl, 4), "Güncel (TL)": round(guncel_fiyat_tl, 4),
-                            "Total K/Z (USD)": "-", "Total K/Z (TL)": round(total_kz_tl, 2)
+                            "Total K/Z (TL)": round(total_kz_tl, 2)
                         })
-                        
-            st.dataframe(ozet_tablo, width=1200)
-        
-        st.divider()
-        st.markdown("#### 📝 İşlem Geçmişi (Tarihsel Tüm Alımlar)")
-        if detayli_tablo:
-            st.dataframe(detayli_tablo, width=1200)
+            
+            # Kategori bazlı tabloyu ekrana çiz
+            st.dataframe(ozet_tablo, use_container_width=True)
 
-    # Yan tarafa işlemi silme modülü ekledik (hatalı kayıtları silmek için)
-    with silme_kolonu:
-        st.markdown("#### Kayıt Sil")
-        st.caption("İşlem Geçmişi tablosundaki 'İşlem No' bilgisini girerek hatalı kaydı silebilirsiniz.")
-        silinecek_id = st.number_input("İşlem No", min_value=0, max_value=len(st.session_state.portfoy)-1 if len(st.session_state.portfoy)>0 else 0, step=1)
-        if st.button("İşlemi Sil", type="primary"):
-            if len(st.session_state.portfoy) > silinecek_id:
-                silinen = st.session_state.portfoy.pop(silinecek_id)
-                verileri_kaydet(st.session_state.portfoy) # Dosyayı yeni haliyle güncelle
-                st.success(f"{silinen['Sembol']} silindi.")
-                time.sleep(0.5)
-                st.rerun()
+    # --- GENEL TOPLAM GÖSTERGESİ (SAĞ ALT KÖŞE MANTIĞI) ---
+    st.divider()
+    genel_kz_tl = genel_guncel_tutar_tl - genel_toplam_yatirilan_tl
+    kz_yuzde = (genel_kz_tl / genel_toplam_yatirilan_tl * 100) if genel_toplam_yatirilan_tl > 0 else 0
+    
+    # Metrikleri sağa yaslamak için boş kolonlar kullanıyoruz
+    bos1, bos2, col1, col2, col3 = st.columns([1, 1, 1, 1, 1])
+    
+    with col1:
+        st.metric("💰 Toplam Yatırılan", f"{genel_toplam_yatirilan_tl:,.2f} ₺")
+    with col2:
+        st.metric("📈 Şu Anki Tutar", f"{genel_guncel_tutar_tl:,.2f} ₺")
+    with col3:
+        st.metric("🎯 Toplam Kâr / Zarar", f"{genel_kz_tl:,.2f} ₺", f"{kz_yuzde:,.2f}%")
 
 else:
     st.info("Portföyünüz şu an boş. Yukarıdan ekleme yapabilirsiniz.")
