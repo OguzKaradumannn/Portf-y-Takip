@@ -10,13 +10,11 @@ import os
 DOSYA_ADI = "portfoyum.csv"
 
 def verileri_yukle():
-    """CSV dosyasından kayıtlı portföyü okur"""
     if os.path.exists(DOSYA_ADI):
         return pd.read_csv(DOSYA_ADI).to_dict('records')
     return []
 
 def verileri_kaydet(portfoy_listesi):
-    """Portföyü CSV dosyasına kalıcı olarak kaydeder"""
     df = pd.DataFrame(portfoy_listesi)
     df.to_csv(DOSYA_ADI, index=False)
 
@@ -47,11 +45,26 @@ def anlik_usd_kuru_getir():
     except:
         return None
 
-def gram_altin_fiyati_getir(usd_kuru):
+def degerli_maden_fiyati_getir(maden_turu, usd_kuru):
     try:
-        ons_altin = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0]
-        if usd_kuru:
+        if not usd_kuru:
+            return None
+            
+        if maden_turu == "Gram Altın (TL)":
+            ons_altin = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0]
             return (ons_altin / 31.1034768) * usd_kuru
+            
+        elif maden_turu == "22 Ayar Altın (TL)":
+            # 22 ayar altın gram fiyatı (Has altın * 0.916)
+            ons_altin = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0]
+            has_gram = (ons_altin / 31.1034768) * usd_kuru
+            return has_gram * 0.916
+            
+        elif maden_turu == "Gümüş (TL)":
+            # Ons Gümüş sembolü: SI=F
+            ons_gumus = yf.Ticker("SI=F").history(period="1d")['Close'].iloc[0]
+            return (ons_gumus / 31.1034768) * usd_kuru
+            
         return None
     except:
         return None
@@ -67,31 +80,40 @@ if 'guncel_usd_kuru' not in st.session_state:
 
 st.info(f"💵 Anlık USD/TRY Kuru: **{st.session_state.guncel_usd_kuru:.4f} ₺**")
 
-# Sayfa açıldığında verileri dosyadan yükle
 if 'portfoy' not in st.session_state:
     st.session_state.portfoy = verileri_yukle()
     
 if 'canli_fiyatlar' not in st.session_state:
     st.session_state.canli_fiyatlar = {}
 
-# --- SOL MENÜ (NAVİGASYON BUTONLARI) ---
+# --- SOL MENÜ ---
 with st.sidebar:
     st.header("📌 Menü")
     sayfa_secimi = st.radio(
         "Gitmek istediğiniz ekranı seçin:",
         ["📈 Portföy Özeti", "📝 İşlem Geçmişi ve Yönetimi"]
     )
-    
     st.divider()
-    st.caption("Yatırım 101 Portföy Yönetim Paneli v2.0")
+    st.caption("Yatırım 101 Portföy Yönetim Paneli")
 
-# --- YENİ VARLIK EKLEME BÖLÜMÜ (Her iki sayfada da üstte dursun ki kolayca alım girebilesin) ---
+# --- YENİ VARLIK EKLEME ---
 with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
-    varlik_turu = st.radio(
+    ana_kategori = st.radio(
         "Ne eklemek istiyorsunuz?", 
-        ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu", "Gram Altın"),
+        ("Hisse / ETF / Fon", "Değerli Madenler"),
         horizontal=True
     )
+
+    if ana_kategori == "Hisse / ETF / Fon":
+        varlik_turu = st.selectbox(
+            "Tür Seçin:",
+            ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu")
+        )
+    else:
+        varlik_turu = st.selectbox(
+            "Değerli Maden Seçin:",
+            ("Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)")
+        )
 
     kolon1, kolon2, kolon3, kolon4 = st.columns(4)
 
@@ -107,13 +129,13 @@ with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
         elif varlik_turu == "TEFAS Fonu":
             sembol_giris = st.text_input("Fon Kodu", "AFT").upper()
         else:
-            sembol_giris = "ALTIN_GRAM"
-            st.write("Gram Altın (TL)")
+            sembol_giris = varlik_turu # Madenler için sabit belirteç
+            st.write(f"Seçilen: {varlik_turu}")
 
     with kolon2:
         maliyet_giris = st.number_input("Alış Fiyatınız", min_value=0.0, format="%.4f")
     with kolon3:
-        adet_giris = st.number_input("Adet", min_value=0.0, format="%.2f")
+        adet_giris = st.number_input("Adet / Gram", min_value=0.0, format="%.2f")
     with kolon4:
         tarih_giris = st.date_input("Alım Tarihi", datetime.now())
 
@@ -151,8 +173,8 @@ if len(st.session_state.portfoy) > 0:
                     pass
             elif tur == "TEFAS Fonu":
                 fiyat = tefas_fon_fiyati_getir(sembol)
-            elif tur == "Gram Altın":
-                fiyat = gram_altin_fiyati_getir(st.session_state.guncel_usd_kuru)
+            elif tur in ["Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)"]:
+                fiyat = degerli_maden_fiyati_getir(tur, st.session_state.guncel_usd_kuru)
             
             st.session_state.canli_fiyatlar[sembol] = fiyat
             
@@ -170,31 +192,31 @@ if len(st.session_state.portfoy) > 0:
                 guncel_fiyat_tl = guncel_fiyat * st.session_state.guncel_usd_kuru
                 kar_zarar_usd = (guncel_fiyat - maliyet) * adet
                 kar_zarar_tl = (guncel_fiyat_tl - maliyet_tl) * adet
+                kz_yuzde = ((guncel_fiyat - maliyet) / maliyet * 100) if maliyet > 0 else 0
                 
                 detayli_tablo.append({
                     "İşlem No": i, "Tarih": tarih, "Varlık": sembol, "Tür": tur,
                     "Alış (USD)": maliyet, "Güncel (USD)": round(guncel_fiyat, 2),
                     "Alış (TL)": round(maliyet_tl, 2), "Güncel (TL)": round(guncel_fiyat_tl, 2),
-                    "Adet": adet, "K/Z (USD)": round(kar_zarar_usd, 2), "K/Z (TL)": round(kar_zarar_tl, 2)
+                    "Adet": adet, "K/Z (USD)": round(kar_zarar_usd, 2), "K/Z (TL)": round(kar_zarar_tl, 2), "K/Z (%)": round(kz_yuzde, 2)
                 })
             else:
                 kar_zarar_tl = (guncel_fiyat - maliyet) * adet
+                kz_yuzde = ((guncel_fiyat - maliyet) / maliyet * 100) if maliyet > 0 else 0
                 detayli_tablo.append({
                     "İşlem No": i, "Tarih": tarih, "Varlık": sembol, "Tür": tur,
                     "Alış (USD)": None, "Güncel (USD)": None,
                     "Alış (TL)": maliyet, "Güncel (TL)": round(guncel_fiyat, 4),
-                    "Adet": adet, "K/Z (USD)": None, "K/Z (TL)": round(kar_zarar_tl, 2)
+                    "Adet": adet, "K/Z (USD)": None, "K/Z (TL)": round(kar_zarar_tl, 2), "K/Z (%)": round(kz_yuzde, 2)
                 })
 
     df_detay = pd.DataFrame(detayli_tablo)
 
     # ==========================================
-    # EKRAN 1: İŞLEM GEÇMİŞİ VE YÖNETİMİ EKRANI
+    # İŞLEM GEÇMİŞİ EKRANI
     # ==========================================
     if sayfa_secimi == "📝 İşlem Geçmişi ve Yönetimi":
         st.header("📝 Tüm İşlem Geçmişi ve Yönetim Paneli")
-        st.markdown("Burada yaptığınız tüm kademeli alımları (DCA) tarihlerine göre görebilir, hatalı bir işlem olduğunda sağdaki panelden silebilirsiniz.")
-        
         col_tablo, col_sil = st.columns([3, 1])
         
         with col_tablo:
@@ -214,7 +236,7 @@ if len(st.session_state.portfoy) > 0:
                     st.rerun()
 
     # ==========================================
-    # EKRAN 2: KONSOLİDE PORTFÖY ÖZETİ (ANA EKRAN)
+    # KONSOLİDE PORTFÖY ÖZETİ (ANA EKRAN)
     # ==========================================
     elif sayfa_secimi == "📈 Portföy Özeti":
         genel_toplam_yatirilan_tl = 0.0
@@ -251,11 +273,16 @@ if len(st.session_state.portfoy) > 0:
                             genel_toplam_yatirilan_tl += toplam_yatirilan_tl_varlik
                             genel_guncel_tutar_tl += guncel_tutar_tl_varlik
                             
+                            toplam_maliyet_tl = ort_maliyet_tl * toplam_adet
+                            kz_yuzde = ((guncel_tutar_tl_varlik - toplam_maliyet_tl) / toplam_maliyet_tl * 100) if toplam_maliyet_tl > 0 else 0
+                            
                             ozet_tablo.append({
                                 "Varlık": v, "Toplam Adet": toplam_adet,
                                 "Ort. Maliyet (USD)": round(ort_maliyet_usd, 2), "Güncel (USD)": round(guncel_fiyat_usd, 2),
+                                "Toplam Maliyet (USD)": round(toplam_yatirilan_usd, 2), "Toplam Tutar (USD)": round(guncel_fiyat_usd * toplam_adet, 2),
                                 "Ort. Maliyet (TL)": round(ort_maliyet_tl, 2), "Güncel (TL)": round(guncel_fiyat_tl, 2),
-                                "Total K/Z (USD)": round(total_kz_usd, 2), "Total K/Z (TL)": round(total_kz_tl, 2)
+                                "Toplam Maliyet (TL)": round(toplam_maliyet_tl, 2), "Toplam Tutar (TL)": round(guncel_tutar_tl_varlik, 2),
+                                "Total K/Z (USD)": round(total_kz_usd, 2), "Total K/Z (TL)": round(total_kz_tl, 2), "K/Z (%)": f"%{kz_yuzde:.2f}"
                             })
                         else:
                             toplam_yatirilan_tl_varlik = (alt_grup['Alış (TL)'] * alt_grup['Adet']).sum()
@@ -268,15 +295,19 @@ if len(st.session_state.portfoy) > 0:
                             genel_toplam_yatirilan_tl += toplam_yatirilan_tl_varlik
                             genel_guncel_tutar_tl += guncel_tutar_tl_varlik
                             
+                            toplam_maliyet_tl = toplam_yatirilan_tl_varlik
+                            kz_yuzde = ((guncel_tutar_tl_varlik - toplam_maliyet_tl) / toplam_maliyet_tl * 100) if toplam_maliyet_tl > 0 else 0
+                            
                             ozet_tablo.append({
                                 "Varlık": v, "Toplam Adet": toplam_adet,
                                 "Ort. Maliyet (TL)": round(ort_maliyet_tl, 4), "Güncel (TL)": round(guncel_fiyat_tl, 4),
-                                "Total K/Z (TL)": round(total_kz_tl, 2)
+                                "Toplam Maliyet (TL)": round(toplam_maliyet_tl, 2), "Toplam Tutar (TL)": round(guncel_tutar_tl_varlik, 2),
+                                "Total K/Z (TL)": round(total_kz_tl, 2), "K/Z (%)": f"%{kz_yuzde:.2f}"
                             })
                 
                 st.dataframe(ozet_tablo, use_container_width=True)
 
-        # --- GENEL TOPLAM GÖSTERGESİ (SAYFANIN EN ALTINDA) ---
+        # --- GENEL TOPLAM GÖSTERGESİ ---
         st.divider()
         genel_kz_tl = genel_guncel_tutar_tl - genel_toplam_yatirilan_tl
         kz_yuzde = (genel_kz_tl / genel_toplam_yatirilan_tl * 100) if genel_toplam_yatirilan_tl > 0 else 0
