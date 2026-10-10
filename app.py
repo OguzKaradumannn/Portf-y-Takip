@@ -92,10 +92,13 @@ else:
     if 'piyasa' not in st.session_state:
         st.session_state.piyasa = {"usd": 35.0, "ons_altin": 2700.0, "gram_altin": 3000.0, "yirmiiki_ayar": 2750.0, "ons_gumus": 30.0, "gram_gumus": 35.0}
 
-p = st.session_state.piyasa
-st.markdown(f"""
-> 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | ✨ **22 Ayar:** {p['yirmiiki_ayar']:.2f} ₺ | 🥈 **Gümüş Ons:** ${p['ons_gumus']:.2f} | ⚪ **Gümüş (TL):** {p['gram_gumus']:.2f} ₺
-""")
+# --- SOL MENÜ ---
+with st.sidebar:
+    st.header("📌 Menü")
+    sayfa_secimi = st.radio(
+        "Gitmek istediğiniz ekranı seçin:",
+        ["📈 Portföy Özeti", "📝 İşlem Geçmişi ve Yönetimi", "⭐ İzleme Listesi"]
+    )
 
 if 'portfoy' not in st.session_state:
     st.session_state.portfoy = verileri_yukle()
@@ -106,74 +109,7 @@ if 'izleme_listesi' not in st.session_state:
 if 'canli_fiyatlar' not in st.session_state:
     st.session_state.canli_fiyatlar = {}
 
-# --- SOL MENÜ ---
-with st.sidebar:
-    st.header("📌 Menü")
-    sayfa_secimi = st.radio(
-        "Gitmek istediğiniz ekranı seçin:",
-        ["📈 Portföy Özeti", "📝 İşlem Geçmişi ve Yönetimi", "⭐ İzleme Listesi"]
-    )
-
-# --- YENİ VARLIK EKLEME ---
-with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
-    ana_kategori = st.radio(
-        "Ne eklemek istiyorsunuz?", 
-        ("Hisse / ETF / Fon", "Değerli Madenler"),
-        horizontal=True
-    )
-
-    if ana_kategori == "Hisse / ETF / Fon":
-        varlik_turu = st.selectbox(
-            "Tür Seçin:",
-            ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu")
-        )
-    else:
-        varlik_turu = st.selectbox(
-            "Değerli Maden Seçin:",
-            ("Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)")
-        )
-
-    kolon1, kolon2, kolon3, kolon4 = st.columns(4)
-
-    with kolon1:
-        if varlik_turu == "BİST Hisse Senedi":
-            sembol_giris = st.text_input("Sembol", "THYAO.IS").upper()
-        elif varlik_turu == "ABD Hisse Senedi":
-             sembol_giris = st.text_input("Sembol", "AAPL").upper()
-             st.caption("Alış Fiyatı: USD")
-        elif varlik_turu == "Yabancı Borsa Fonu (ETF)":
-             sembol_giris = st.text_input("Sembol", "FDVV").upper()
-             st.caption("Alış Fiyatı: USD")
-        elif varlik_turu == "TEFAS Fonu":
-            sembol_giris = st.text_input("Fon Kodu", "AFT").upper()
-        else:
-            sembol_giris = varlik_turu
-            st.write(f"Seçilen: {varlik_turu}")
-
-    with kolon2:
-        maliyet_giris = st.number_input("Alış Fiyatınız", min_value=0.0, format="%.4f")
-    with kolon3:
-        adet_giris = st.number_input("Adet / Gram", min_value=0.0, format="%.2f")
-    with kolon4:
-        tarih_giris = st.date_input("Alım Tarihi", datetime.now())
-
-    if st.button("Portföye Kaydet", type="primary"):
-        yeni_islem = {
-            "Tarih": tarih_giris.strftime("%Y-%m-%d"),
-            "Tür": varlik_turu,
-            "Sembol": sembol_giris,
-            "Maliyet": maliyet_giris,
-            "Adet": adet_giris
-        }
-        st.session_state.portfoy.append(yeni_islem)
-        verileri_kaydet(st.session_state.portfoy)
-        st.success(f"{sembol_giris} portföye kalıcı olarak eklendi!")
-        time.sleep(0.5) 
-        st.rerun() 
-
-st.divider()
-
-# --- PORTFÖY HESAPLAMA MOTORU (HER EKRAN İÇİN ORTAK ÇALIŞIR) ---
+# --- PORTFÖY HESAPLAMA MOTORU ---
 detayli_tablo = []
 if len(st.session_state.portfoy) > 0:
     for kalem in st.session_state.portfoy:
@@ -353,6 +289,71 @@ elif sayfa_secimi == "⭐ İzleme Listesi":
 # EKRAN 3: KONSOLİDE PORTFÖY ÖZETİ (ANA EKRAN)
 # ==========================================
 elif sayfa_secimi == "📈 Portföy Özeti":
+    # Canlı kurlar ve maden fiyatları paneli SADECE bu sekmede gözükür
+    p = st.session_state.piyasa
+    st.markdown(f"""
+    > 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | ✨ **22 Ayar:** {p['yirmiiki_ayar']:.2f} ₺ | 🥈 **Gümüş Ons:** ${p['ons_gumus']:.2f} | ⚪ **Gümüş (TL):** {p['gram_gumus']:.2f} ₺
+    """)
+
+    # Yeni varlık ekleme formu SADECE bu sekmede gözükür
+    with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
+        ana_kategori = st.radio(
+            "Ne eklemek istiyorsunuz?", 
+            ("Hisse / ETF / Fon", "Değerli Madenler"),
+            horizontal=True
+        )
+
+        if ana_kategori == "Hisse / ETF / Fon":
+            varlik_turu = st.selectbox(
+                "Tür Seçin:",
+                ("BİST Hisse Senedi", "ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)", "TEFAS Fonu")
+            )
+        else:
+            varlik_turu = st.selectbox(
+                "Değerli Maden Seçin:",
+                ("Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)")
+            )
+
+        kolon1, kolon2, kolon3, kolon4 = st.columns(4)
+
+        with kolon1:
+            if varlik_turu == "BİST Hisse Senedi":
+                sembol_giris = st.text_input("Sembol", "THYAO.IS").upper()
+            elif varlik_turu == "ABD Hisse Senedi":
+                 sembol_giris = st.text_input("Sembol", "AAPL").upper()
+                 st.caption("Alış Fiyatı: USD")
+            elif varlik_turu == "Yabancı Borsa Fonu (ETF)":
+                 sembol_giris = st.text_input("Sembol", "FDVV").upper()
+                 st.caption("Alış Fiyatı: USD")
+            elif varlik_turu == "TEFAS Fonu":
+                sembol_giris = st.text_input("Fon Kodu", "AFT").upper()
+            else:
+                sembol_giris = varlik_turu
+                st.write(f"Seçilen: {varlik_turu}")
+
+        with kolon2:
+            maliyet_giris = st.number_input("Alış Fiyatınız", min_value=0.0, format="%.4f")
+        with kolon3:
+            adet_giris = st.number_input("Adet / Gram", min_value=0.0, format="%.2f")
+        with kolon4:
+            tarih_giris = st.date_input("Alım Tarihi", datetime.now())
+
+        if st.button("Portföye Kaydet", type="primary"):
+            yeni_islem = {
+                "Tarih": tarih_giris.strftime("%Y-%m-%d"),
+                "Tür": varlik_turu,
+                "Sembol": sembol_giris,
+                "Maliyet": maliyet_giris,
+                "Adet": adet_giris
+            }
+            st.session_state.portfoy.append(yeni_islem)
+            verileri_kaydet(st.session_state.portfoy)
+            st.success(f"{sembol_giris} portföye kalıcı olarak eklendi!")
+            time.sleep(0.5) 
+            st.rerun() 
+
+    st.divider()
+
     genel_toplam_yatirilan_tl = 0.0
     genel_guncel_tutar_tl = 0.0
     
@@ -434,4 +435,4 @@ elif sayfa_secimi == "📈 Portföy Özeti":
         with col3:
             st.metric("🎯 Toplam Kâr / Zarar", f"{genel_kz_tl:,.2f} ₺", f"{kz_yuzde:,.2f}%")
     else:
-        st.info("Portföyünüz şu an boş. Sol menüden veya üstteki 'Yeni Varlık Ekle' alanından ekleme yapabilirsiniz.")
+        st.info("Portföyünüz şu an boş. Üstteki 'Yeni Varlık Ekle' alanından ekleme yapabilirsiniz.")
