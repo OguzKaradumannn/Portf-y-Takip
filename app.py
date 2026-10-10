@@ -132,8 +132,9 @@ if len(st.session_state.portfoy) > 0:
                     pass
             elif tur == "TEFAS Fonu":
                 fiyat = tefas_fon_fiyati_getir(sembol)
-            elif tur in ["Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)"]:
-                fiyat = degerli_maden_fiyati_getir(tur, st.session_state.piyasa)
+            elif tur in ["Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)"] or sembol in ["Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)"]:
+                maden_adi = tur if tur in ["Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)"] else sembol
+                fiyat = degerli_maden_fiyati_getir(maden_adi, st.session_state.piyasa)
             
             st.session_state.canli_fiyatlar[sembol] = fiyat
             
@@ -253,7 +254,7 @@ elif sayfa_secimi == "⭐ İzleme Listesi":
 # ==========================================
 elif sayfa_secimi == "📈 Portföy Özeti":
     p = st.session_state.piyasa
-    st.markdown(f"> 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | 🥈 **Gümüş (TL):** {p['gram_gumus']:.2f} ₺")
+    st.markdown(f"> 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | ✨ **22 Ayar:** {p['yirmiiki_ayar']:.2f} ₺ | 🥈 **Gümüş Ons:** ${p['ons_gumus']:.2f} | ⚪ **Gümüş (TL):** {p['gram_gumus']:.2f} ₺")
 
     with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
         ana_kategori = st.radio("Kategori", ("Hisse / ETF / Fon", "Değerli Madenler"), horizontal=True)
@@ -264,7 +265,11 @@ elif sayfa_secimi == "📈 Portföy Özeti":
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            sembol_giris = st.text_input("Sembol", "AAPL" if "ABD" in varlik_turu else "THYAO.IS").upper()
+            if ana_kategori == "Hisse / ETF / Fon":
+                sembol_giris = st.text_input("Sembol", "AAPL" if "ABD" in varlik_turu else "THYAO.IS").upper()
+            else:
+                sembol_giris = varlik_turu 
+                st.info(f"Seçilen Maden: {varlik_turu}")
         with c2:
             maliyet_giris = st.number_input("Alış Fiyatı", min_value=0.0, format="%.4f")
         with c3:
