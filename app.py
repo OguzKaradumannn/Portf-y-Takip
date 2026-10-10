@@ -38,47 +38,57 @@ def tefas_fon_fiyati_getir(fon_kodu):
     except:
         return None
 
-def anlik_usd_kuru_getir():
+def piyasa_verilerini_getir():
+    """USD kuru, Altın/Gümüş ons ve gram fiyatlarını anlık çeker"""
     try:
         usd_try = yf.Ticker("TRY=X").history(period="1d")['Close'].iloc[0]
-        return float(usd_try)
+        ons_altin = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0]
+        ons_gumus = yf.Ticker("SI=F").history(period="1d")['Close'].iloc[0]
+        
+        gram_altin_tl = (ons_altin / 31.1034768) * usd_try
+        yirmiiki_ayar_tl = gram_altin_tl * 0.916
+        gram_gumus_tl = (ons_gumus / 31.1034768) * usd_try
+        
+        return {
+            "usd": float(usd_try),
+            "ons_altin": float(ons_altin),
+            "gram_altin": float(gram_altin_tl),
+            "yirmiiki_ayar": float(yirmiiki_ayar_tl),
+            "ons_gumus": float(ons_gumus),
+            "gram_gumus": float(gram_gumus_tl)
+        }
     except:
         return None
 
-def degerli_maden_fiyati_getir(maden_turu, usd_kuru):
-    try:
-        if not usd_kuru:
-            return None
-            
-        if maden_turu == "Gram Altın (TL)":
-            ons_altin = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0]
-            return (ons_altin / 31.1034768) * usd_kuru
-            
-        elif maden_turu == "22 Ayar Altın (TL)":
-            # 22 ayar altın gram fiyatı (Has altın * 0.916)
-            ons_altin = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0]
-            has_gram = (ons_altin / 31.1034768) * usd_kuru
-            return has_gram * 0.916
-            
-        elif maden_turu == "Gümüş (TL)":
-            # Ons Gümüş sembolü: SI=F
-            ons_gumus = yf.Ticker("SI=F").history(period="1d")['Close'].iloc[0]
-            return (ons_gumus / 31.1034768) * usd_kuru
-            
+def degerli_maden_fiyati_getir(maden_turu, veriler):
+    if not veriler:
         return None
-    except:
-        return None
+    if maden_turu == "Gram Altın (TL)":
+        return veriler["gram_altin"]
+    elif maden_turu == "22 Ayar Altın (TL)":
+        return veriler["yirmiiki_ayar"]
+    elif maden_turu == "Gümüş (TL)":
+        return veriler["gram_gumus"]
+    return None
 
 # --- ARAYÜZ (FRONTEND) VE HAFIZA ---
 
 st.set_page_config(page_title="Portföyüm", layout="wide")
 st.title("Gelişmiş Yatırım Portföyü 🚀")
 
-if 'guncel_usd_kuru' not in st.session_state:
-    kuru_cek = anlik_usd_kuru_getir()
-    st.session_state.guncel_usd_kuru = kuru_cek if kuru_cek else 35.0
+# Piyasa verilerini çek ve session'a kaydet
+piyasa = piyasa_verilerini_getir()
+if piyasa:
+    st.session_state.piyasa = piyasa
+else:
+    if 'piyasa' not in st.session_state:
+        st.session_state.piyasa = {"usd": 35.0, "ons_altin": 2700.0, "gram_altin": 3000.0, "yirmiiki_ayar": 2750.0, "ons_gumus": 30.0, "gram_gumus": 35.0}
 
-st.info(f"💵 Anlık USD/TRY Kuru: **{st.session_state.guncel_usd_kuru:.4f} ₺**")
+# Üst Panel: Canlı Kurlar ve Maden Fiyatları
+p = st.session_state.piyasa
+st.markdown(f"""
+> 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | ✨ **22 Ayar:** {p['yirmiiki_ayar']:.2f} ₺ | 🥈 **Gümüş Ons:** ${p['ons_gumus']:.2f} | ⚪ **Gümüş (TL):** {p['gram_gumus']:.2f} ₺
+""")
 
 if 'portfoy' not in st.session_state:
     st.session_state.portfoy = verileri_yukle()
@@ -86,15 +96,13 @@ if 'portfoy' not in st.session_state:
 if 'canli_fiyatlar' not in st.session_state:
     st.session_state.canli_fiyatlar = {}
 
-# --- SOL MENÜ ---
+# --- SOL MENÜ (İstenmeyen yazı kaldırıldı) ---
 with st.sidebar:
     st.header("📌 Menü")
     sayfa_secimi = st.radio(
         "Gitmek istediğiniz ekranı seçin:",
         ["📈 Portföy Özeti", "📝 İşlem Geçmişi ve Yönetimi"]
     )
-    st.divider()
-    st.caption("Yatırım 101 Portföy Yönetim Paneli")
 
 # --- YENİ VARLIK EKLEME ---
 with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
@@ -129,7 +137,7 @@ with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
         elif varlik_turu == "TEFAS Fonu":
             sembol_giris = st.text_input("Fon Kodu", "AFT").upper()
         else:
-            sembol_giris = varlik_turu # Madenler için sabit belirteç
+            sembol_giris = varlik_turu
             st.write(f"Seçilen: {varlik_turu}")
 
     with kolon2:
@@ -174,7 +182,7 @@ if len(st.session_state.portfoy) > 0:
             elif tur == "TEFAS Fonu":
                 fiyat = tefas_fon_fiyati_getir(sembol)
             elif tur in ["Gram Altın (TL)", "22 Ayar Altın (TL)", "Gümüş (TL)"]:
-                fiyat = degerli_maden_fiyati_getir(tur, st.session_state.guncel_usd_kuru)
+                fiyat = degerli_maden_fiyati_getir(tur, st.session_state.piyasa)
             
             st.session_state.canli_fiyatlar[sembol] = fiyat
             
@@ -188,8 +196,8 @@ if len(st.session_state.portfoy) > 0:
         
         if guncel_fiyat is not None:
             if tur in ["ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)"]:
-                maliyet_tl = maliyet * st.session_state.guncel_usd_kuru
-                guncel_fiyat_tl = guncel_fiyat * st.session_state.guncel_usd_kuru
+                maliyet_tl = maliyet * st.session_state.piyasa['usd']
+                guncel_fiyat_tl = guncel_fiyat * st.session_state.piyasa['usd']
                 kar_zarar_usd = (guncel_fiyat - maliyet) * adet
                 kar_zarar_tl = (guncel_fiyat_tl - maliyet_tl) * adet
                 kz_yuzde = ((guncel_fiyat - maliyet) / maliyet * 100) if maliyet > 0 else 0
@@ -261,7 +269,7 @@ if len(st.session_state.portfoy) > 0:
                         if tur in ["ABD Hisse Senedi", "Yabancı Borsa Fonu (ETF)"]:
                             toplam_yatirilan_usd = (alt_grup['Alış (USD)'] * alt_grup['Adet']).sum()
                             ort_maliyet_usd = toplam_yatirilan_usd / toplam_adet
-                            ort_maliyet_tl = ort_maliyet_usd * st.session_state.guncel_usd_kuru
+                            ort_maliyet_tl = ort_maliyet_usd * st.session_state.piyasa['usd']
                             guncel_fiyat_usd = alt_grup['Güncel (USD)'].iloc[0]
                             guncel_fiyat_tl = alt_grup['Güncel (TL)'].iloc[0]
                             total_kz_usd = alt_grup['K/Z (USD)'].sum()
