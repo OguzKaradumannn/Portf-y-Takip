@@ -2,5 +2,4 @@ streamlit
 yfinance
 pytefas
 pandas
-gspread
-oauth2client
+st-gsheets-connection
