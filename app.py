@@ -91,7 +91,7 @@ def degerli_maden_fiyati_getir(maden_turu, veriler):
 
 # --- ARAYÜZ ---
 st.set_page_config(page_title="Portföyüm", layout="wide")
-st.title("Gelişmiş Yatırım Portföyü 🚀 (Google Sheets Senkronize)")
+st.title("Gelişmiş Yatırım Portföyü 🚀")
 
 piyasa = piyasa_verilerini_getir()
 if piyasa:
