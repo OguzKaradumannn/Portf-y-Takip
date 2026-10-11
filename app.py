@@ -179,20 +179,27 @@ if len(st.session_state.portfoy) > 0:
 df_detay = pd.DataFrame(detayli_tablo)
 
 # ==========================================
-# EKRAN 1: İŞLEM GEÇMİŞİ
+# EKRAN 1: İŞLEM GEÇMİŞİ (ÜRÜN BAZLI TABLOLAR)
 # ==========================================
 if sayfa_secimi == "📝 İşlem Geçmişi ve Yönetimi":
-    st.header("📝 Tüm İşlem Geçmişi ve Yönetim Paneli")
+    st.header("📝 Ürün Bazlı İşlem Geçmişi ve Yönetim Paneli")
+    
     col_tablo, col_sil = st.columns([3, 1])
     
     with col_tablo:
         if not df_detay.empty:
-            st.dataframe(df_detay, use_container_width=True, height=500)
+            varliklar = df_detay['Varlık'].unique()
+            for v in varliklar:
+                st.subheader(f"🔹 {v} İşlemleri")
+                grup_df = df_detay[df_detay['Varlık'] == v]
+                st.dataframe(grup_df, use_container_width=True)
+                st.divider()
         else:
             st.info("Henüz eklenmiş bir işlem bulunmuyor.")
             
     with col_sil:
         st.subheader("🗑️ Kayıt Sil")
+        st.caption("Silmek istediğiniz işlemin sol tablodaki **İşlem No** numarasını girin.")
         silinecek_id = st.number_input("İşlem No:", min_value=0, max_value=len(st.session_state.portfoy)-1 if len(st.session_state.portfoy)>0 else 0, step=1)
         if st.button("Seçili İşlemi Sil", type="primary"):
             if len(st.session_state.portfoy) > silinecek_id:
