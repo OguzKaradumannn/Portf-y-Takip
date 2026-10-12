@@ -2,6 +2,7 @@ import yfinance as yf
 import streamlit as st
 import time
 import requests
+from bs4 import BeautifulSoup
 from pytefas import Crawler
 from datetime import datetime, timedelta
 import pandas as pd
@@ -104,36 +105,33 @@ def piyasa_verilerini_getir():
         yirmiiki_ayar_yf = gram_altin_yf * 0.916
         gram_gumus_tl = (ons_gumus / 31.1034768) * usd_try
         
-        # 2. Gerçek Türkiye Altın Fiyatları (Doviz.com & GenelPara API)
+        # 2. HAREM ALTIN'DAN GERÇEK KAPALIÇARŞI VERİSİ
         gram_altin_tr = None
         yirmiiki_ayar_tr = None
+        veri_kaynagi = "Yahoo Finance"
         
         try:
-            # Birinci Yöntem: Doviz.com Canlı API
-            url = "https://www.doviz.com/api/v1/golds/all/latest"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            r = requests.get(url, headers=headers, timeout=5)
+            url = "https://www.haremaltin.com/dashboard/ajax/doviz"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json, text/javascript, */*; q=0.01"
+            }
+            # Harem Altın verileri POST isteği ile döner
+            r = requests.post(url, headers=headers, timeout=5)
             if r.status_code == 200:
-                for kalem in r.json():
-                    if kalem.get("code") == "GRAMALTIN":
-                        gram_altin_tr = float(kalem.get("selling", 0))
-                    elif kalem.get("code") == "22AYAR":
-                        yirmiiki_ayar_tr = float(kalem.get("selling", 0))
+                json_veri = r.json()
+                altinlar = json_veri.get("data", {})
+                
+                if "ALTIN" in altinlar:
+                    gram_altin_tr = float(altinlar["ALTIN"]["satis"])
+                if "AYAR22" in altinlar:
+                    yirmiiki_ayar_tr = float(altinlar["AYAR22"]["satis"])
+                
+                if gram_altin_tr and gram_altin_tr > 0:
+                    veri_kaynagi = "Harem Altın"
         except:
             pass
-            
-        if not gram_altin_tr:
-            try:
-                # İkinci Yöntem (Yedek): GenelPara API
-                url2 = "https://api.genelpara.com/embed/altin.json"
-                headers2 = {"User-Agent": "Mozilla/5.0"}
-                r2 = requests.get(url2, headers=headers2, timeout=5)
-                if r2.status_code == 200:
-                    veri2 = r2.json()
-                    gram_altin_tr = float(veri2.get("GA", {}).get("satis", 0))
-                    yirmiiki_ayar_tr = float(veri2.get("A22", {}).get("satis", 0))
-            except:
-                pass
 
         return {
             "usd": usd_try,
@@ -141,7 +139,8 @@ def piyasa_verilerini_getir():
             "gram_altin": gram_altin_tr if (gram_altin_tr and gram_altin_tr > 0) else gram_altin_yf,
             "yirmiiki_ayar": yirmiiki_ayar_tr if (yirmiiki_ayar_tr and yirmiiki_ayar_tr > 0) else yirmiiki_ayar_yf,
             "ons_gumus": ons_gumus,
-            "gram_gumus": gram_gumus_tl
+            "gram_gumus": gram_gumus_tl,
+            "kaynak": veri_kaynagi
         }
     except:
         return None
@@ -165,7 +164,7 @@ if piyasa:
     st.session_state.piyasa = piyasa
 else:
     if 'piyasa' not in st.session_state:
-        st.session_state.piyasa = {"usd": 35.0, "ons_altin": 2700.0, "gram_altin": 3000.0, "yirmiiki_ayar": 2750.0, "ons_gumus": 30.0, "gram_gumus": 35.0}
+        st.session_state.piyasa = {"usd": 35.0, "ons_altin": 2700.0, "gram_altin": 3000.0, "yirmiiki_ayar": 2750.0, "ons_gumus": 30.0, "gram_gumus": 35.0, "kaynak": "-"}
 
 with st.sidebar:
     st.header("📌 Menü")
@@ -332,8 +331,9 @@ elif sayfa_secimi == "⭐ İzleme Listesi":
 # ==========================================
 elif sayfa_secimi == "📈 Portföy Özeti":
     p = st.session_state.piyasa
-    # Yıldızlar (Markdown) tamamen kaldırılarak düz metin haline getirildi
+    # Fiyatların Harem Altın'dan çekildiğini göstermek için küçük bir bilgilendirme eklendi
     st.markdown(f"> 💵 USD/TRY: {p['usd']:.2f} ₺ | 🥇 Altın Ons: ${p['ons_altin']:.2f} | 🟡 Gram Altın: {p['gram_altin']:.2f} ₺ | ✨ 22 Ayar: {p['yirmiiki_ayar']:.2f} ₺ | 🥈 Gümüş Ons: ${p['ons_gumus']:.2f} | ⚪ Gümüş (TL): {p['gram_gumus']:.2f} ₺")
+    st.caption(f"📌 *Maden fiyatları anlık olarak **{p.get('kaynak', 'Sistem')}** veritabanından alınmaktadır.*")
 
     with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
         ana_kategori = st.radio("Kategori", ("Hisse / ETF / Fon", "Değerli Madenler"), horizontal=True)
