@@ -186,7 +186,7 @@ if 'canli_fiyatlar' not in st.session_state:
 # SOL MENÜ SİSTEMİ (TEMİZ & SADE)
 # ==========================================
 with st.sidebar:
-    st.markdown("### 📊 FINBO-PORTFÖY")
+    st.markdown("### 📊 PORTFÖYÜM")
     st.text_input("", placeholder="🔍 Şirket veya Varlık Ara...")
     
     sayfa_secimi = st.radio(
@@ -196,10 +196,9 @@ with st.sidebar:
             "🧾 Alım Detay", 
             "⭐ İzleme Listesi"
         ],
-        index=0 # Varsayılan olarak Portföyüm'ü açar
+        index=0
     )
     st.write("")
-    st.button("👑 Hemen Pro Dene", type="primary", use_container_width=True)
     st.divider()
     if st.button("🚪 Çıkış Yap", type="secondary", use_container_width=True):
         st.session_state["giris_basarili"] = False
@@ -313,12 +312,13 @@ if sayfa_secimi == "💼 Portföyüm":
             st.markdown(f"#### 🔹 {tur}")
             grup = df_detay[df_detay['Tür'] == tur]
             
-            # Tablo Başlıkları
-            hc1, hc2, hc3, hc4 = st.columns([3, 3, 2, 2])
+            # Tablo Başlıkları (K/Z TL Eklendi)
+            hc1, hc2, hc3, hc4, hc5 = st.columns([3, 2, 2, 2, 2])
             hc1.markdown("<span style='color:gray; font-size:14px'><b>VARLIK / SEMBOL</b></span>", unsafe_allow_html=True)
             hc2.markdown("<span style='color:gray; font-size:14px'><b>ŞU ANKİ TUTAR</b></span>", unsafe_allow_html=True)
-            hc3.markdown("<span style='color:gray; font-size:14px'><b>K/Z (%)</b></span>", unsafe_allow_html=True)
-            hc4.markdown("<span style='color:gray; font-size:14px'><b>AKSİYON</b></span>", unsafe_allow_html=True)
+            hc3.markdown("<span style='color:gray; font-size:14px'><b>K/Z (TL)</b></span>", unsafe_allow_html=True)
+            hc4.markdown("<span style='color:gray; font-size:14px'><b>K/Z (%)</b></span>", unsafe_allow_html=True)
+            hc5.markdown("<span style='color:gray; font-size:14px'><b>AKSİYON</b></span>", unsafe_allow_html=True)
             st.markdown("<hr style='margin-top: 5px; margin-bottom: 10px;'>", unsafe_allow_html=True)
             
             for v in grup['Varlık'].unique():
@@ -340,6 +340,7 @@ if sayfa_secimi == "💼 Portföyüm":
                         
                     genel_toplam_yatirilan_tl += top_yat_tl
                     genel_guncel_tutar_tl += guncel_tut_tl
+                    kz_tl = guncel_tut_tl - top_yat_tl
                     kz_yuzde = ((guncel_tut_tl - top_yat_tl) / top_yat_tl * 100) if top_yat_tl > 0 else 0
                     
                     row_data = {
@@ -348,20 +349,23 @@ if sayfa_secimi == "💼 Portföyüm":
                         "Güncel (TL)": guncel_tl,
                         "Toplam Maliyet (TL)": top_yat_tl,
                         "Toplam Tutar (TL)": guncel_tut_tl,
-                        "K/Z (TL)": (guncel_tut_tl - top_yat_tl),
+                        "K/Z (TL)": kz_tl,
                         "K/Z (%)": kz_yuzde
                     }
 
-                    # Satır Görüntüsü
-                    rc1, rc2, rc3, rc4 = st.columns([3, 3, 2, 2])
+                    # Satır Görüntüsü (K/Z TL Sütunu ile)
+                    rc1, rc2, rc3, rc4, rc5 = st.columns([3, 2, 2, 2, 2])
                     rc1.markdown(f"<div style='padding-top:8px; font-size:18px'><b>{v}</b></div>", unsafe_allow_html=True)
                     rc2.markdown(f"<div style='padding-top:8px; font-size:17px'>{guncel_tut_tl:,.2f} ₺</div>", unsafe_allow_html=True)
                     
                     renk = "#00d084" if kz_yuzde >= 0 else "#ff6b6b"
                     ok = "▲" if kz_yuzde >= 0 else "▼"
-                    rc3.markdown(f"<div style='padding-top:8px; color:{renk}; font-weight:bold; font-size:16px'>{ok} %{kz_yuzde:.2f}</div>", unsafe_allow_html=True)
                     
-                    if rc4.button("🔍 İncele", key=f"detay_{v}"):
+                    # K/Z (TL) ve K/Z (%) yan yana sütunlar
+                    rc3.markdown(f"<div style='padding-top:8px; color:{renk}; font-weight:bold; font-size:16px'>{kz_tl:,.2f} ₺</div>", unsafe_allow_html=True)
+                    rc4.markdown(f"<div style='padding-top:8px; color:{renk}; font-weight:bold; font-size:16px'>{ok} %{kz_yuzde:.2f}</div>", unsafe_allow_html=True)
+                    
+                    if rc5.button("🔍 İncele", key=f"detay_{v}"):
                         varlik_detayi_goster(v, alt, row_data)
                         
             st.write("") # Boşluk
