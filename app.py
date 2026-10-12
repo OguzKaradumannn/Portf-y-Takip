@@ -1,10 +1,45 @@
 import yfinance as yf
 import streamlit as st
 import time
+import requests
+from bs4 import BeautifulSoup
 from pytefas import Crawler
 from datetime import datetime, timedelta
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+
+st.set_page_config(page_title="Portföyüm", layout="wide")
+
+# ==========================================
+# GÜVENLİK DUVARI (LOGIN SİSTEMİ)
+# ==========================================
+def sifre_kontrol():
+    def sifre_girildi():
+        # Secrets'tan şifreyi okur, eğer secrets'ta yoksa "123456" kabul eder
+        beklenen_sifre = st.secrets.get("sistem_sifresi", "123456")
+        if st.session_state["sifre_kutusu"] == beklenen_sifre:
+            st.session_state["giris_basarili"] = True
+            del st.session_state["sifre_kutusu"]
+        else:
+            st.session_state["giris_basarili"] = False
+
+    if "giris_basarili" not in st.session_state:
+        st.title("🔒 Güvenli Giriş")
+        st.warning("Bu sistem özel finansal veriler içerir. Lütfen erişim şifrenizi giriniz.")
+        st.text_input("Sistem Şifresi:", type="password", on_change=sifre_girildi, key="sifre_kutusu")
+        return False
+    elif not st.session_state["giris_basarili"]:
+        st.title("🔒 Güvenli Giriş")
+        st.text_input("Sistem Şifresi:", type="password", on_change=sifre_girildi, key="sifre_kutusu")
+        st.error("❌ Hatalı şifre girdiniz. Lütfen tekrar deneyin.")
+        return False
+    else:
+        return True
+
+# Eğer şifre girilmediyse kodun geri kalanını çalıştırmaz (Tam güvenlik)
+if not sifre_kontrol():
+    st.stop()
+
 
 # --- GOOGLE SHEETS BAĞLANTI MOTORU ---
 def verileri_yukle_gsheets():
@@ -59,21 +94,50 @@ def tefas_fon_fiyati_getir(fon_kodu):
 
 def piyasa_verilerini_getir():
     try:
-        usd_try = yf.Ticker("TRY=X").history(period="1d")['Close'].iloc[0]
-        ons_altin = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0]
-        ons_gumus = yf.Ticker("SI=F").history(period="1d")['Close'].iloc[0]
+        # 1. Döviz ve Gümüş Ons (Yahoo Finance)
+        usd_try = float(yf.Ticker("TRY=X").history(period="1d")['Close'].iloc[0])
+        ons_altin_yf = float(yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0])
+        ons_gumus = float(yf.Ticker("SI=F").history(period="1d")['Close'].iloc[0])
         
-        gram_altin_tl = (ons_altin / 31.1034768) * usd_try
-        yirmiiki_ayar_tl = gram_altin_tl * 0.916
+        # Yahoo üzerinden yedek hesaplama (Scraping çökerse diye)
+        gram_altin_yf = (ons_altin_yf / 31.1034768) * usd_try
+        yirmiiki_ayar_yf = gram_altin_yf * 0.916
         gram_gumus_tl = (ons_gumus / 31.1034768) * usd_try
         
+        # 2. Altın Fiyatları (Uzmanpara Web Scraping)
+        gram_altin_up = None
+        yirmiiki_ayar_up = None
+        
+        try:
+            url = "https://uzmanpara.milliyet.com.tr/altin-fiyatlari/"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(r.text, "html.parser")
+            
+            for tr in soup.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) >= 3:
+                    isim = tds[0].get_text(strip=True).lower()
+                    # Türkiye formatını (3.050,45) Python formatına (3050.45) çeviriyoruz
+                    fiyat_str = tds[2].get_text(strip=True).replace('.', '').replace(',', '.')
+                    try:
+                        fiyat = float(fiyat_str)
+                        if "gram altın" in isim and gram_altin_up is None:
+                            gram_altin_up = fiyat
+                        elif "22 ayar" in isim and yirmiiki_ayar_up is None:
+                            yirmiiki_ayar_up = fiyat
+                    except:
+                        pass
+        except:
+            pass # Uzmanpara çekilemezse sessizce Yahoo verisine döner
+
         return {
-            "usd": float(usd_try),
-            "ons_altin": float(ons_altin),
-            "gram_altin": float(gram_altin_tl),
-            "yirmiiki_ayar": float(yirmiiki_ayar_tl),
-            "ons_gumus": float(ons_gumus),
-            "gram_gumus": float(gram_gumus_tl)
+            "usd": usd_try,
+            "ons_altin": ons_altin_yf,
+            "gram_altin": gram_altin_up if gram_altin_up else gram_altin_yf,
+            "yirmiiki_ayar": yirmiiki_ayar_up if yirmiiki_ayar_up else yirmiiki_ayar_yf,
+            "ons_gumus": ons_gumus,
+            "gram_gumus": gram_gumus_tl
         }
     except:
         return None
@@ -90,7 +154,6 @@ def degerli_maden_fiyati_getir(maden_turu, veriler):
     return None
 
 # --- ARAYÜZ ---
-st.set_page_config(page_title="Portföyüm", layout="wide")
 st.title("Gelişmiş Yatırım Portföyü 🚀")
 
 piyasa = piyasa_verilerini_getir()
@@ -106,6 +169,10 @@ with st.sidebar:
         "Gitmek istediğiniz ekranı seçin:",
         ["📈 Portföy Özeti", "📝 İşlem Geçmişi ve Yönetimi", "⭐ İzleme Listesi"]
     )
+    st.divider()
+    if st.button("🚪 Çıkış Yap", type="secondary"):
+        st.session_state["giris_basarili"] = False
+        st.rerun()
 
 if 'portfoy' not in st.session_state:
     st.session_state.portfoy = verileri_yukle_gsheets()
@@ -179,7 +246,7 @@ if len(st.session_state.portfoy) > 0:
 df_detay = pd.DataFrame(detayli_tablo)
 
 # ==========================================
-# EKRAN 1: İŞLEM GEÇMİŞİ (ÜRÜN BAZLI TABLOLAR)
+# EKRAN 1: İŞLEM GEÇMİŞİ
 # ==========================================
 if sayfa_secimi == "📝 İşlem Geçmişi ve Yönetimi":
     st.header("📝 Ürün Bazlı İşlem Geçmişi ve Yönetim Paneli")
