@@ -2,7 +2,6 @@ import yfinance as yf
 import streamlit as st
 import time
 import requests
-from bs4 import BeautifulSoup
 from pytefas import Crawler
 from datetime import datetime, timedelta
 import pandas as pd
@@ -47,9 +46,8 @@ if not sifre_kontrol():
 @st.dialog("🔍 Kapsamlı Varlık Analizi", width="large")
 def varlik_detayi_goster(varlik_adi, alt_grup, row_data):
     st.markdown(f"### {varlik_adi}")
-    st.caption("Bu pencerede ilgili varlığa ait tüm maliyet ve işlem detaylarını inceleyebilirsiniz.")
+    st.caption("Bu pencerede ilgili varlığa ait genel özet bilgileri görebilirsiniz. Tüm işlem listesi için sol menüden 'Alım Detay' sekmesine gidebilirsiniz.")
     
-    # Metrikler
     c1, c2, c3 = st.columns(3)
     c1.metric("📦 Toplam Adet / Gram", f"{row_data.get('Toplam Adet', 0):,.2f}")
     c2.metric("💵 Ort. Maliyet (TL)", f"{row_data.get('Ort. Maliyet (TL)', 0):,.2f} ₺")
@@ -62,20 +60,6 @@ def varlik_detayi_goster(varlik_adi, alt_grup, row_data):
     kz_tl = row_data.get('K/Z (TL)', 0)
     kz_yuzde = row_data.get('K/Z (%)', 0)
     c6.metric("🎯 Toplam K/Z (TL)", f"{kz_tl:,.2f} ₺", f"%{kz_yuzde:.2f}")
-    
-    st.divider()
-    st.markdown("#### 📝 İlgili Alım İşlemleri (Geçmiş)")
-    
-    # Görüntüyü temizle (Sadece lazım olan sütunları göster)
-    gosterilecek_df = alt_grup.copy()
-    if 'İşlem No' in gosterilecek_df.columns:
-        gosterilecek_df = gosterilecek_df.set_index('İşlem No')
-    
-    # Tamamen boş olan USD sütunlarını gizle
-    cols_to_drop = [c for c in gosterilecek_df.columns if "USD" in c and gosterilecek_df[c].isnull().all()]
-    gosterilecek_df = gosterilecek_df.drop(columns=cols_to_drop, errors='ignore')
-    
-    st.dataframe(gosterilecek_df, use_container_width=True)
 
 
 # ==========================================
@@ -199,7 +183,7 @@ if 'canli_fiyatlar' not in st.session_state:
     st.session_state.canli_fiyatlar = {}
 
 # ==========================================
-# SOL MENÜ SİSTEMİ (FINBOSOFT KLONU)
+# SOL MENÜ SİSTEMİ (TEMİZ & SADE)
 # ==========================================
 with st.sidebar:
     st.markdown("### 📊 FINBO-PORTFÖY")
@@ -208,18 +192,11 @@ with st.sidebar:
     sayfa_secimi = st.radio(
         "Menü",
         [
-            "📈 Piyasa", 
-            "🧾 Bilançolar", 
-            "🝗 Filtrele", 
-            "🚀 Halka Arz", 
-            "🛠️ Pro Araçlar", 
-            "🤖 Yapay Zeka 🔒", 
-            "🎯 Skor 🔒", 
-            "💎 Gerçek Değer 🔒", 
-            "📊 Portföy Analizi 🔒", 
-            "💼 Portföy Cüzdan 🔒"
+            "💼 Portföyüm", 
+            "🧾 Alım Detay", 
+            "⭐ İzleme Listesi"
         ],
-        index=9 # Varsayılan olarak Portföy Cüzdan'ı açar
+        index=0 # Varsayılan olarak Portföyüm'ü açar
     )
     st.write("")
     st.button("👑 Hemen Pro Dene", type="primary", use_container_width=True)
@@ -289,11 +266,10 @@ if len(st.session_state.portfoy) > 0:
 df_detay = pd.DataFrame(detayli_tablo)
 
 # ==========================================
-# EKRAN YÖNETİMİ
+# EKRAN 1: PORTFÖYÜM (SADE ANA EKRAN)
 # ==========================================
-
-if sayfa_secimi == "💼 Portföy Cüzdan 🔒":
-    st.title("💼 Portföy Cüzdanınız")
+if sayfa_secimi == "💼 Portföyüm":
+    st.title("💼 Portföyüm")
     p = st.session_state.piyasa
     st.markdown(f"> 💵 USD/TRY: **{p['usd']:.2f} ₺** &nbsp;|&nbsp; 🥇 Altın Ons: **${p['ons_altin']:.2f}** &nbsp;|&nbsp; 🟡 Gram Altın: **{p['gram_altin']:.2f} ₺** &nbsp;|&nbsp; ✨ 22 Ayar: **{p['yirmiiki_ayar']:.2f} ₺** &nbsp;|&nbsp; 🥈 Gümüş: **{p['gram_gumus']:.2f} ₺**")
 
@@ -402,39 +378,58 @@ if sayfa_secimi == "💼 Portföy Cüzdan 🔒":
     else:
         st.info("Portföyünüz boş, hemen işlem ekleyebilirsiniz.")
 
-elif sayfa_secimi == "📊 Portföy Analizi 🔒":
-    st.title("📊 Portföy Analizi (İşlem Yönetimi)")
+# ==========================================
+# EKRAN 2: ALIM DETAY (TÜM İŞLEMLER VE SİLME)
+# ==========================================
+elif sayfa_secimi == "🧾 Alım Detay":
+    st.title("🧾 İşlem Yönetimi ve Alım Detayları")
     col_tablo, col_sil = st.columns([3, 1])
+    
     with col_tablo:
         if not df_detay.empty:
             for v in df_detay['Varlık'].unique():
-                st.subheader(f"🔹 {v} İşlemleri")
-                st.dataframe(df_detay[df_detay['Varlık'] == v], use_container_width=True)
+                st.subheader(f"🔹 {v} Tüm Alım İşlemleri")
+                gosterilecek_df = df_detay[df_detay['Varlık'] == v]
+                
+                if 'İşlem No' in gosterilecek_df.columns:
+                    gosterilecek_df = gosterilecek_df.set_index('İşlem No')
+                
+                cols_to_drop = [c for c in gosterilecek_df.columns if "USD" in c and gosterilecek_df[c].isnull().all()]
+                gosterilecek_df = gosterilecek_df.drop(columns=cols_to_drop, errors='ignore')
+                
+                st.dataframe(gosterilecek_df, use_container_width=True)
+                st.divider()
         else:
-            st.info("Kayıt yok.")
+            st.info("Sistemde henüz kayıtlı bir işleminiz bulunmuyor.")
+            
     with col_sil:
         st.subheader("🗑️ Kayıt Sil")
-        silinecek_id = st.number_input("Silinecek İşlem No:", min_value=0, step=1)
-        if st.button("İşlemi Sil", type="primary"):
+        st.caption("İşlemi silmek için sol tablodaki **İşlem No**'yu girin.")
+        silinecek_id = st.number_input("İşlem No:", min_value=0, step=1)
+        if st.button("Seçili İşlemi Sil", type="primary"):
             if len(st.session_state.portfoy) > silinecek_id:
                 st.session_state.portfoy.pop(silinecek_id)
                 verileri_kaydet_gsheets(st.session_state.portfoy)
-                st.success("Silindi!")
+                st.success("İşlem silindi!")
                 time.sleep(0.5)
                 st.rerun()
 
-elif sayfa_secimi == "📈 Piyasa":
-    st.title("📈 Piyasa ve İzleme Listesi")
+# ==========================================
+# EKRAN 3: İZLEME LİSTESİ
+# ==========================================
+elif sayfa_secimi == "⭐ İzleme Listesi":
+    st.title("⭐ İzleme Listesi")
     with st.form("izleme_formu"):
         col_l1, col_l2, col_l3 = st.columns(3)
-        with col_l1: liste_adi = st.text_input("Liste Adı").strip().title()
+        with col_l1: liste_adi = st.text_input("Liste Adı (Örn: Teknoloji)").strip().title()
         with col_l2: takip_sembol = st.text_input("Sembol (Örn: NVDA)").strip().upper()
         with col_l3: takip_turu = st.selectbox("Tür", ("ABD Hisse / ETF", "BİST Hisse", "TEFAS Fonu"))
-        if st.form_submit_button("Ekle", type="primary") and liste_adi and takip_sembol:
+        if st.form_submit_button("Listeye Ekle", type="primary") and liste_adi and takip_sembol:
             st.session_state.izleme_listesi.append({"Liste Adi": liste_adi, "Sembol": takip_sembol, "Tur": takip_turu})
             izleme_listesini_kaydet_gsheets(st.session_state.izleme_listesi)
-            st.success("Eklendi!")
+            st.success(f"{takip_sembol} başarıyla eklendi!")
             st.rerun()
+            
     st.divider()
     if len(st.session_state.izleme_listesi) > 0:
         df_izleme = pd.DataFrame(st.session_state.izleme_listesi)
@@ -449,9 +444,13 @@ elif sayfa_secimi == "📈 Piyasa":
                     if t in ["ABD Hisse / ETF", "BİST Hisse"]: fiyat = float(yf.Ticker(s).history(period="1d")['Close'].iloc[-1])
                     elif t == "TEFAS Fonu": fiyat = tefas_fon_fiyati_getir(s)
                 except: pass
-                tablo_v.append({"Sembol": s, "Fiyat": fiyat})
-            st.dataframe(tablo_v)
-
-else:
-    st.title(sayfa_secimi)
-    st.info("Bu ekran şu anda yapım aşamasındadır. Çok yakında hizmetinizde olacak! 🚀")
+                tablo_v.append({"Sembol": s, "Fiyat": fiyat, "Tür": t})
+            st.dataframe(tablo_v, use_container_width=True)
+            
+            # İzleme Listesinden silme butonu
+            sil_id = st.selectbox(f"Silinecek Sembol ({l_adi}):", ["Seçiniz..."] + list(grup['Sembol']), key=f"sil_{l_adi}")
+            if sil_id != "Seçiniz..." and st.button(f"Kaldır ({l_adi})", key=f"btn_{l_adi}"):
+                st.session_state.izleme_listesi = [item for item in st.session_state.izleme_listesi if not (item['Liste Adi'] == l_adi and item['Sembol'] == sil_id)]
+                izleme_listesini_kaydet_gsheets(st.session_state.izleme_listesi)
+                st.rerun()
+            st.divider()
