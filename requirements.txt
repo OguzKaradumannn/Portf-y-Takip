@@ -2,4 +2,5 @@ streamlit
 yfinance
 pytefas
 pandas
-st-gsheets-connection
+requests
+beautifulsoup4
