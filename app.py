@@ -2,7 +2,6 @@ import yfinance as yf
 import streamlit as st
 import time
 import requests
-from bs4 import BeautifulSoup
 from pytefas import Crawler
 from datetime import datetime, timedelta
 import pandas as pd
@@ -15,9 +14,10 @@ st.set_page_config(page_title="Portföyüm", layout="wide")
 # ==========================================
 def sifre_kontrol():
     def sifre_girildi():
-        # Secrets'tan şifreyi okur, eğer secrets'ta yoksa "123456" kabul eder
-        beklenen_sifre = st.secrets.get("sistem_sifresi", "123456")
-        if st.session_state["sifre_kutusu"] == beklenen_sifre:
+        beklenen_sifre = str(st.secrets.get("sistem_sifresi", "123456")).strip()
+        girilen_sifre = str(st.session_state["sifre_kutusu"]).strip()
+        
+        if girilen_sifre == beklenen_sifre:
             st.session_state["giris_basarili"] = True
             del st.session_state["sifre_kutusu"]
         else:
@@ -99,43 +99,47 @@ def piyasa_verilerini_getir():
         ons_altin_yf = float(yf.Ticker("GC=F").history(period="1d")['Close'].iloc[0])
         ons_gumus = float(yf.Ticker("SI=F").history(period="1d")['Close'].iloc[0])
         
-        # Yahoo üzerinden yedek hesaplama (Scraping çökerse diye)
+        # Yahoo üzerinden yedek hesaplama
         gram_altin_yf = (ons_altin_yf / 31.1034768) * usd_try
         yirmiiki_ayar_yf = gram_altin_yf * 0.916
         gram_gumus_tl = (ons_gumus / 31.1034768) * usd_try
         
-        # 2. Altın Fiyatları (Uzmanpara Web Scraping)
-        gram_altin_up = None
-        yirmiiki_ayar_up = None
+        # 2. Gerçek Türkiye Altın Fiyatları (Doviz.com & GenelPara API)
+        gram_altin_tr = None
+        yirmiiki_ayar_tr = None
         
         try:
-            url = "https://uzmanpara.milliyet.com.tr/altin-fiyatlari/"
-            headers = {"User-Agent": "Mozilla/5.0"}
+            # Birinci Yöntem: Doviz.com Canlı API
+            url = "https://www.doviz.com/api/v1/golds/all/latest"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             r = requests.get(url, headers=headers, timeout=5)
-            soup = BeautifulSoup(r.text, "html.parser")
-            
-            for tr in soup.find_all("tr"):
-                tds = tr.find_all("td")
-                if len(tds) >= 3:
-                    isim = tds[0].get_text(strip=True).lower()
-                    # Türkiye formatını (3.050,45) Python formatına (3050.45) çeviriyoruz
-                    fiyat_str = tds[2].get_text(strip=True).replace('.', '').replace(',', '.')
-                    try:
-                        fiyat = float(fiyat_str)
-                        if "gram altın" in isim and gram_altin_up is None:
-                            gram_altin_up = fiyat
-                        elif "22 ayar" in isim and yirmiiki_ayar_up is None:
-                            yirmiiki_ayar_up = fiyat
-                    except:
-                        pass
+            if r.status_code == 200:
+                for kalem in r.json():
+                    if kalem.get("code") == "GRAMALTIN":
+                        gram_altin_tr = float(kalem.get("selling", 0))
+                    elif kalem.get("code") == "22AYAR":
+                        yirmiiki_ayar_tr = float(kalem.get("selling", 0))
         except:
-            pass # Uzmanpara çekilemezse sessizce Yahoo verisine döner
+            pass
+            
+        if not gram_altin_tr:
+            try:
+                # İkinci Yöntem (Yedek): GenelPara API
+                url2 = "https://api.genelpara.com/embed/altin.json"
+                headers2 = {"User-Agent": "Mozilla/5.0"}
+                r2 = requests.get(url2, headers=headers2, timeout=5)
+                if r2.status_code == 200:
+                    veri2 = r2.json()
+                    gram_altin_tr = float(veri2.get("GA", {}).get("satis", 0))
+                    yirmiiki_ayar_tr = float(veri2.get("A22", {}).get("satis", 0))
+            except:
+                pass
 
         return {
             "usd": usd_try,
             "ons_altin": ons_altin_yf,
-            "gram_altin": gram_altin_up if gram_altin_up else gram_altin_yf,
-            "yirmiiki_ayar": yirmiiki_ayar_up if yirmiiki_ayar_up else yirmiiki_ayar_yf,
+            "gram_altin": gram_altin_tr if (gram_altin_tr and gram_altin_tr > 0) else gram_altin_yf,
+            "yirmiiki_ayar": yirmiiki_ayar_tr if (yirmiiki_ayar_tr and yirmiiki_ayar_tr > 0) else yirmiiki_ayar_yf,
             "ons_gumus": ons_gumus,
             "gram_gumus": gram_gumus_tl
         }
@@ -328,7 +332,8 @@ elif sayfa_secimi == "⭐ İzleme Listesi":
 # ==========================================
 elif sayfa_secimi == "📈 Portföy Özeti":
     p = st.session_state.piyasa
-    st.markdown(f"> 💵 **USD/TRY:** {p['usd']:.2f} ₺ | 🥇 **Altın Ons:** ${p['ons_altin']:.2f} | 🟡 **Gram Altın:** {p['gram_altin']:.2f} ₺ | ✨ **22 Ayar:** {p['yirmiiki_ayar']:.2f} ₺ | 🥈 **Gümüş Ons:** ${p['ons_gumus']:.2f} | ⚪ **Gümüş (TL):** {p['gram_gumus']:.2f} ₺")
+    # Yıldızlar (Markdown) tamamen kaldırılarak düz metin haline getirildi
+    st.markdown(f"> 💵 USD/TRY: {p['usd']:.2f} ₺ | 🥇 Altın Ons: ${p['ons_altin']:.2f} | 🟡 Gram Altın: {p['gram_altin']:.2f} ₺ | ✨ 22 Ayar: {p['yirmiiki_ayar']:.2f} ₺ | 🥈 Gümüş Ons: ${p['ons_gumus']:.2f} | ⚪ Gümüş (TL): {p['gram_gumus']:.2f} ₺")
 
     with st.expander("➕ Yeni Varlık Ekle (Alım Yap)", expanded=False):
         ana_kategori = st.radio("Kategori", ("Hisse / ETF / Fon", "Değerli Madenler"), horizontal=True)
